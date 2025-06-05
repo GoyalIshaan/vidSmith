@@ -1,0 +1,22 @@
+{
+  "name": "gateway",
+  "module": "index.ts",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run index.ts",
+    "gql:codegen": "npx exec mercurius-codegen --schema schema.graphql --target types/graphql.ts"
+  },
+  "dependencies": {
+    "fastify": "^4.24.3",
+    "graphql": "^16.8.1",
+    "mercurius": "^11.5.0",
+    "mercurius-codegen": "^6.0.1"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^20.10.0"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

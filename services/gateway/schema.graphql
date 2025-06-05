@@ -1,0 +1,66 @@
+# services/gateway/schema.graphql
+
+"""
+A video in the system, tracked by metadata-service.
+"""
+type Video {
+  id: ID! # Unique identifier from metadata-service
+  filename: String! # Original filename
+  status: VideoStatus! # UPLOADING | TRANSCODING | READY | ERROR
+  manifestUrl: String # S3 URL for HLS/DASH manifest (set when transcoding completes)
+  captionsUrl: String # S3 URL for WebVTT captions (set when captioning completes)
+}
+
+enum VideoStatus {
+  UPLOADING
+  TRANSCODING
+  READY
+  ERROR
+}
+
+"""
+Presigned URL for a single part in a multipart upload.
+"""
+type PresignedUrl {
+  part: Int! # Part number (1-based)
+  url: String! # Presigned S3 URL for that part
+}
+
+"""
+Information required to upload a new video in multiple parts.
+"""
+type UploadInfo {
+  uploadId: ID! # ID of the multipart upload session
+  presignedUrls: [PresignedUrl!]! # One presigned URL per chunk/part
+}
+
+type Query {
+  """
+  List all videos (basic info).
+  """
+  videos: [Video!]!
+
+  """
+  Get details for one video by ID.
+  """
+  video(id: ID!): Video
+}
+
+type Mutation {
+  """
+  Start a multipart upload for a new video; returns presigned URLs.
+  """
+  initiateUpload(filename: String!): InitiateUploadResponse!
+}
+
+type InitiateUploadResponse {
+  id: ID!
+  uploadInfo: UploadInfo!
+}
+
+type Subscription {
+  """
+  Listen for when a video finishes processing (status becomes READY).
+  """
+  videoProcessed(id: ID!): Video
+}
