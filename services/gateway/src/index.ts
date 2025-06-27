@@ -3,42 +3,56 @@ import Fastify from "fastify";
 import mercurius from "mercurius";
 import { readFileSync } from "fs";
 import path from "path";
+import "dotenv/config";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { UploadClient } from "./clients/uploadClient";
+import { MetadataClient } from "./clients/metadataClient";
+import { resolvers } from "./resolvers";
+
+export const DB = drizzle(process.env.DATABASE_URL!);
 
 // Import the programmatic API
 import codegenMercurius, { gql as gqlTag } from "mercurius-codegen";
 
+declare module "fastify" {
+  interface FastifyInstance {
+    uploadClient: UploadClient;
+  }
+}
+
+// Extend MercuriusContext to include uploadClient
+declare module "mercurius" {
+  interface MercuriusContext {
+    uploadClient: UploadClient;
+    metadataClient: MetadataClient;
+  }
+}
+
 const app = Fastify({ logger: true });
 
-app.decorate("uploadClient", new UploadClient(process.env.UPLOAD_SERVICE_URL!));
-app.decorate(
-  "metadataClient",
-  new MetadataClient(process.env.METADATA_SERVICE_URL!)
-);
+app.decorate("uploadClient", new UploadClient());
 
 // 3) Load SDL (you can also embed via gqlTag)
 const schema = readFileSync(path.join(__dirname, "schema.graphql"), "utf-8");
 
 // 4) Register Mercurius
-app.register(mercurius, {
+app.register(mercurius as any, {
   schema,
   resolvers,
   subscription: {
-    // Mercurius’s built-in PubSub is automatically available under ctx.pubsub
-    onConnect: (connectionParams, socket, context) => {
+    // Mercurius's built-in PubSub is automatically available under ctx.pubsub
+    onConnect: (connectionParams: any, socket: any, context: any) => {
       app.log.info("Subscription client connected");
     },
-    onDisconnect: (socket, context) => {
+    onDisconnect: (socket: any, context: any) => {
       app.log.info("Subscription client disconnected");
     },
   },
-  context: (req, reply) => {
+  context: (req: any, reply: any) => {
     return {
-      uploadClient: new UploadClient(),
-      metadataClient: new MetadataClient(),
-      pubsub: app.pubsub,
+      uploadClient: (app as any).uploadClient,
     };
   },
-  subscription: {},
   graphiql: true,
   jit: 1,
 });

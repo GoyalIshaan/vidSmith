@@ -1,7 +1,5 @@
 import type { GraphQLResolveInfo } from "graphql";
 import type { MercuriusContext } from "mercurius";
-import type { FastifyInstance } from "fastify";
-
 export type Maybe<T> = T | null;
 export type InputMaybe<T> = Maybe<T>;
 export type Exact<T extends { [key: string]: unknown }> = {
@@ -17,7 +15,7 @@ export type ResolverFn<TResult, TParent, TContext, TArgs> = (
   parent: TParent,
   args: TArgs,
   context: TContext,
-  info: GraphQLResolveInfo
+  info: GraphQLResolveInfo,
 ) =>
   | Promise<import("mercurius-codegen").DeepPartial<TResult>>
   | import("mercurius-codegen").DeepPartial<TResult>;
@@ -38,10 +36,12 @@ export type Scalars = {
 export type Video = {
   __typename?: "Video";
   id: Scalars["ID"];
-  filename: Scalars["String"];
+  videoName: Scalars["String"];
   status: VideoStatus;
-  manifestUrl?: Maybe<Scalars["String"]>;
-  captionsUrl?: Maybe<Scalars["String"]>;
+  s3Key?: Maybe<Scalars["String"]>;
+  bucketName?: Maybe<Scalars["String"]>;
+  captionsKey?: Maybe<Scalars["String"]>;
+  createdAt: Scalars["String"];
 };
 
 export enum VideoStatus {
@@ -65,6 +65,12 @@ export type UploadInfo = {
   presignedUrls: Array<PresignedUrl>;
 };
 
+/** Input type for a completed part in a multipart upload. */
+export type PartInput = {
+  ETag: Scalars["String"];
+  PartNumber: Scalars["Int"];
+};
+
 export type Query = {
   __typename?: "Query";
   /** List all videos (basic info). */
@@ -80,17 +86,53 @@ export type QueryvideoArgs = {
 export type Mutation = {
   __typename?: "Mutation";
   /** Start a multipart upload for a new video; returns presigned URLs. */
-  initiateUpload: InitiateUploadResponse;
+  initiateMultipartUpload: InitiateUploadResponse;
+  /** Generate a presigned URL for a part of a multipart upload. */
+  generateUploadPartUrl: Scalars["String"];
+  /** Complete a multipart upload. */
+  completeMultipartUpload: CompleteMultipartUploadResponse;
+  /** Abort a multipart upload. */
+  abortMultipartUpload: Scalars["Boolean"];
 };
 
-export type MutationinitiateUploadArgs = {
-  filename: Scalars["String"];
+export type MutationinitiateMultipartUploadArgs = {
+  videoName: Scalars["String"];
+  fileName: Scalars["String"];
+  contentType: Scalars["String"];
+  size: Scalars["Int"];
+};
+
+export type MutationgenerateUploadPartUrlArgs = {
+  key: Scalars["String"];
+  uploadId: Scalars["String"];
+  partNumber: Scalars["Int"];
+};
+
+export type MutationcompleteMultipartUploadArgs = {
+  key: Scalars["String"];
+  uploadId: Scalars["String"];
+  videoDBID: Scalars["String"];
+  parts: Array<PartInput>;
+};
+
+export type MutationabortMultipartUploadArgs = {
+  key: Scalars["String"];
+  uploadId: Scalars["String"];
+  videoDBID: Scalars["String"];
+};
+
+export type CompleteMultipartUploadResponse = {
+  __typename?: "CompleteMultipartUploadResponse";
+  videoDBID: Scalars["ID"];
+  bucketName: Scalars["String"];
+  status: VideoStatus;
 };
 
 export type InitiateUploadResponse = {
   __typename?: "InitiateUploadResponse";
-  id: Scalars["ID"];
-  uploadInfo: UploadInfo;
+  uploadId: Scalars["ID"];
+  videoDBID: Scalars["ID"];
+  key: Scalars["String"];
 };
 
 export type Subscription = {
@@ -116,14 +158,14 @@ export type SubscriptionSubscribeFn<TResult, TParent, TContext, TArgs> = (
   parent: TParent,
   args: TArgs,
   context: TContext,
-  info: GraphQLResolveInfo
+  info: GraphQLResolveInfo,
 ) => AsyncIterable<TResult> | Promise<AsyncIterable<TResult>>;
 
 export type SubscriptionResolveFn<TResult, TParent, TContext, TArgs> = (
   parent: TParent,
   args: TArgs,
   context: TContext,
-  info: GraphQLResolveInfo
+  info: GraphQLResolveInfo,
 ) => TResult | Promise<TResult>;
 
 export interface SubscriptionSubscriberObject<
@@ -177,13 +219,13 @@ export type SubscriptionResolver<
 export type TypeResolveFn<TTypes, TParent = {}, TContext = {}> = (
   parent: TParent,
   context: TContext,
-  info: GraphQLResolveInfo
+  info: GraphQLResolveInfo,
 ) => Maybe<TTypes> | Promise<Maybe<TTypes>>;
 
 export type IsTypeOfResolverFn<T = {}, TContext = {}> = (
   obj: T,
   context: TContext,
-  info: GraphQLResolveInfo
+  info: GraphQLResolveInfo,
 ) => boolean | Promise<boolean>;
 
 export type NextResolverFn<T> = () => Promise<T>;
@@ -198,7 +240,7 @@ export type DirectiveResolverFn<
   parent: TParent,
   args: TArgs,
   context: TContext,
-  info: GraphQLResolveInfo
+  info: GraphQLResolveInfo,
 ) => TResult | Promise<TResult>;
 
 /** Mapping between all available schema types and the resolvers types */
@@ -210,11 +252,13 @@ export type ResolversTypes = {
   PresignedUrl: ResolverTypeWrapper<PresignedUrl>;
   Int: ResolverTypeWrapper<Scalars["Int"]>;
   UploadInfo: ResolverTypeWrapper<UploadInfo>;
+  PartInput: PartInput;
   Query: ResolverTypeWrapper<{}>;
   Mutation: ResolverTypeWrapper<{}>;
+  Boolean: ResolverTypeWrapper<Scalars["Boolean"]>;
+  CompleteMultipartUploadResponse: ResolverTypeWrapper<CompleteMultipartUploadResponse>;
   InitiateUploadResponse: ResolverTypeWrapper<InitiateUploadResponse>;
   Subscription: ResolverTypeWrapper<{}>;
-  Boolean: ResolverTypeWrapper<Scalars["Boolean"]>;
 };
 
 /** Mapping between all available schema types and the resolvers parents */
@@ -225,36 +269,40 @@ export type ResolversParentTypes = {
   PresignedUrl: PresignedUrl;
   Int: Scalars["Int"];
   UploadInfo: UploadInfo;
+  PartInput: PartInput;
   Query: {};
   Mutation: {};
+  Boolean: Scalars["Boolean"];
+  CompleteMultipartUploadResponse: CompleteMultipartUploadResponse;
   InitiateUploadResponse: InitiateUploadResponse;
   Subscription: {};
-  Boolean: Scalars["Boolean"];
 };
 
 export type VideoResolvers<
-  ContextType = Context,
+  ContextType = MercuriusContext,
   ParentType extends
     ResolversParentTypes["Video"] = ResolversParentTypes["Video"],
 > = {
   id?: Resolver<ResolversTypes["ID"], ParentType, ContextType>;
-  filename?: Resolver<ResolversTypes["String"], ParentType, ContextType>;
+  videoName?: Resolver<ResolversTypes["String"], ParentType, ContextType>;
   status?: Resolver<ResolversTypes["VideoStatus"], ParentType, ContextType>;
-  manifestUrl?: Resolver<
+  s3Key?: Resolver<Maybe<ResolversTypes["String"]>, ParentType, ContextType>;
+  bucketName?: Resolver<
     Maybe<ResolversTypes["String"]>,
     ParentType,
     ContextType
   >;
-  captionsUrl?: Resolver<
+  captionsKey?: Resolver<
     Maybe<ResolversTypes["String"]>,
     ParentType,
     ContextType
   >;
+  createdAt?: Resolver<ResolversTypes["String"], ParentType, ContextType>;
   isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
 };
 
 export type PresignedUrlResolvers<
-  ContextType = Context,
+  ContextType = MercuriusContext,
   ParentType extends
     ResolversParentTypes["PresignedUrl"] = ResolversParentTypes["PresignedUrl"],
 > = {
@@ -264,7 +312,7 @@ export type PresignedUrlResolvers<
 };
 
 export type UploadInfoResolvers<
-  ContextType = Context,
+  ContextType = MercuriusContext,
   ParentType extends
     ResolversParentTypes["UploadInfo"] = ResolversParentTypes["UploadInfo"],
 > = {
@@ -278,7 +326,7 @@ export type UploadInfoResolvers<
 };
 
 export type QueryResolvers<
-  ContextType = Context,
+  ContextType = MercuriusContext,
   ParentType extends
     ResolversParentTypes["Query"] = ResolversParentTypes["Query"],
 > = {
@@ -292,30 +340,72 @@ export type QueryResolvers<
 };
 
 export type MutationResolvers<
-  ContextType = Context,
+  ContextType = MercuriusContext,
   ParentType extends
     ResolversParentTypes["Mutation"] = ResolversParentTypes["Mutation"],
 > = {
-  initiateUpload?: Resolver<
+  initiateMultipartUpload?: Resolver<
     ResolversTypes["InitiateUploadResponse"],
     ParentType,
     ContextType,
-    RequireFields<MutationinitiateUploadArgs, "filename">
+    RequireFields<
+      MutationinitiateMultipartUploadArgs,
+      "videoName" | "fileName" | "contentType" | "size"
+    >
+  >;
+  generateUploadPartUrl?: Resolver<
+    ResolversTypes["String"],
+    ParentType,
+    ContextType,
+    RequireFields<
+      MutationgenerateUploadPartUrlArgs,
+      "key" | "uploadId" | "partNumber"
+    >
+  >;
+  completeMultipartUpload?: Resolver<
+    ResolversTypes["CompleteMultipartUploadResponse"],
+    ParentType,
+    ContextType,
+    RequireFields<
+      MutationcompleteMultipartUploadArgs,
+      "key" | "uploadId" | "videoDBID" | "parts"
+    >
+  >;
+  abortMultipartUpload?: Resolver<
+    ResolversTypes["Boolean"],
+    ParentType,
+    ContextType,
+    RequireFields<
+      MutationabortMultipartUploadArgs,
+      "key" | "uploadId" | "videoDBID"
+    >
   >;
 };
 
+export type CompleteMultipartUploadResponseResolvers<
+  ContextType = MercuriusContext,
+  ParentType extends
+    ResolversParentTypes["CompleteMultipartUploadResponse"] = ResolversParentTypes["CompleteMultipartUploadResponse"],
+> = {
+  videoDBID?: Resolver<ResolversTypes["ID"], ParentType, ContextType>;
+  bucketName?: Resolver<ResolversTypes["String"], ParentType, ContextType>;
+  status?: Resolver<ResolversTypes["VideoStatus"], ParentType, ContextType>;
+  isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
+};
+
 export type InitiateUploadResponseResolvers<
-  ContextType = Context,
+  ContextType = MercuriusContext,
   ParentType extends
     ResolversParentTypes["InitiateUploadResponse"] = ResolversParentTypes["InitiateUploadResponse"],
 > = {
-  id?: Resolver<ResolversTypes["ID"], ParentType, ContextType>;
-  uploadInfo?: Resolver<ResolversTypes["UploadInfo"], ParentType, ContextType>;
+  uploadId?: Resolver<ResolversTypes["ID"], ParentType, ContextType>;
+  videoDBID?: Resolver<ResolversTypes["ID"], ParentType, ContextType>;
+  key?: Resolver<ResolversTypes["String"], ParentType, ContextType>;
   isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
 };
 
 export type SubscriptionResolvers<
-  ContextType = Context,
+  ContextType = MercuriusContext,
   ParentType extends
     ResolversParentTypes["Subscription"] = ResolversParentTypes["Subscription"],
 > = {
@@ -328,12 +418,13 @@ export type SubscriptionResolvers<
   >;
 };
 
-export type Resolvers<ContextType = Context> = {
+export type Resolvers<ContextType = MercuriusContext> = {
   Video?: VideoResolvers<ContextType>;
   PresignedUrl?: PresignedUrlResolvers<ContextType>;
   UploadInfo?: UploadInfoResolvers<ContextType>;
   Query?: QueryResolvers<ContextType>;
   Mutation?: MutationResolvers<ContextType>;
+  CompleteMultipartUploadResponse?: CompleteMultipartUploadResponseResolvers<ContextType>;
   InitiateUploadResponse?: InitiateUploadResponseResolvers<ContextType>;
   Subscription?: SubscriptionResolvers<ContextType>;
 };
@@ -345,7 +436,7 @@ export type Loader<TReturn, TObj, TParams, TContext> = (
   }>,
   context: TContext & {
     reply: import("fastify").FastifyReply;
-  }
+  },
 ) => Promise<Array<import("mercurius-codegen").DeepPartial<TReturn>>>;
 export type LoaderResolver<TReturn, TObj, TParams, TContext> =
   | Loader<TReturn, TObj, TParams, TContext>
@@ -362,10 +453,12 @@ export interface Loaders<
 > {
   Video?: {
     id?: LoaderResolver<Scalars["ID"], Video, {}, TContext>;
-    filename?: LoaderResolver<Scalars["String"], Video, {}, TContext>;
+    videoName?: LoaderResolver<Scalars["String"], Video, {}, TContext>;
     status?: LoaderResolver<VideoStatus, Video, {}, TContext>;
-    manifestUrl?: LoaderResolver<Maybe<Scalars["String"]>, Video, {}, TContext>;
-    captionsUrl?: LoaderResolver<Maybe<Scalars["String"]>, Video, {}, TContext>;
+    s3Key?: LoaderResolver<Maybe<Scalars["String"]>, Video, {}, TContext>;
+    bucketName?: LoaderResolver<Maybe<Scalars["String"]>, Video, {}, TContext>;
+    captionsKey?: LoaderResolver<Maybe<Scalars["String"]>, Video, {}, TContext>;
+    createdAt?: LoaderResolver<Scalars["String"], Video, {}, TContext>;
   };
 
   PresignedUrl?: {
@@ -383,10 +476,42 @@ export interface Loaders<
     >;
   };
 
+  CompleteMultipartUploadResponse?: {
+    videoDBID?: LoaderResolver<
+      Scalars["ID"],
+      CompleteMultipartUploadResponse,
+      {},
+      TContext
+    >;
+    bucketName?: LoaderResolver<
+      Scalars["String"],
+      CompleteMultipartUploadResponse,
+      {},
+      TContext
+    >;
+    status?: LoaderResolver<
+      VideoStatus,
+      CompleteMultipartUploadResponse,
+      {},
+      TContext
+    >;
+  };
+
   InitiateUploadResponse?: {
-    id?: LoaderResolver<Scalars["ID"], InitiateUploadResponse, {}, TContext>;
-    uploadInfo?: LoaderResolver<
-      UploadInfo,
+    uploadId?: LoaderResolver<
+      Scalars["ID"],
+      InitiateUploadResponse,
+      {},
+      TContext
+    >;
+    videoDBID?: LoaderResolver<
+      Scalars["ID"],
+      InitiateUploadResponse,
+      {},
+      TContext
+    >;
+    key?: LoaderResolver<
+      Scalars["String"],
       InitiateUploadResponse,
       {},
       TContext
@@ -398,9 +523,3 @@ declare module "mercurius" {
     extends Resolvers<import("mercurius").MercuriusContext> {}
   interface MercuriusLoaders extends Loaders {}
 }
-
-export type Context = MercuriusContext & {
-  uploadClient: UploadClient;
-  metadataClient: MetadataClient;
-  pubsub: MercuriusContext["pubsub"];
-};
