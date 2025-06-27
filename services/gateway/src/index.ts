@@ -8,39 +8,24 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { UploadClient } from "./clients/uploadClient";
 import { MetadataClient } from "./clients/metadataClient";
 import { resolvers } from "./resolvers";
+import codegenMercurius from "mercurius-codegen";
+import "./types/mercurius";
+import "./types/fastify";
 
 export const DB = drizzle(process.env.DATABASE_URL!);
-
-// Import the programmatic API
-import codegenMercurius, { gql as gqlTag } from "mercurius-codegen";
-
-declare module "fastify" {
-  interface FastifyInstance {
-    uploadClient: UploadClient;
-  }
-}
-
-// Extend MercuriusContext to include uploadClient
-declare module "mercurius" {
-  interface MercuriusContext {
-    uploadClient: UploadClient;
-    metadataClient: MetadataClient;
-  }
-}
 
 const app = Fastify({ logger: true });
 
 app.decorate("uploadClient", new UploadClient());
+app.decorate("metadataClient", new MetadataClient());
 
-// 3) Load SDL (you can also embed via gqlTag)
+// Load the GraphQL schema from a separate schema file
 const schema = readFileSync(path.join(__dirname, "schema.graphql"), "utf-8");
 
-// 4) Register Mercurius
 app.register(mercurius as any, {
   schema,
   resolvers,
   subscription: {
-    // Mercurius's built-in PubSub is automatically available under ctx.pubsub
     onConnect: (connectionParams: any, socket: any, context: any) => {
       app.log.info("Subscription client connected");
     },
@@ -48,27 +33,22 @@ app.register(mercurius as any, {
       app.log.info("Subscription client disconnected");
     },
   },
-  context: (req: any, reply: any) => {
+  context: () => {
     return {
-      uploadClient: (app as any).uploadClient,
+      uploadClient: app.uploadClient,
+      metadataClient: app.metadataClient,
     };
   },
   graphiql: true,
   jit: 1,
 });
 
-// 5) Invoke programmatic codegen
-//    - `targetPath`: relative or absolute path to where you want TS types
-//    - `operationsGlob`: optional, for client-side queries
+// Generate types for the GraphQL schema
 codegenMercurius(app, {
   targetPath: path.join(__dirname, "types", "graphql.ts"),
-  // No need to specify operationsGlob unless you want TypedDocumentNodes
-})
-  .then(() => app.log.info("Generated types/graphql.ts"))
-  .catch((err) => app.log.error("Codegen error:", err));
+});
 
-// 6) Start server
-const start = async () => {
+async function start() {
   try {
     await app.listen({
       port: Number(process.env.PORT) || 3000,
@@ -79,6 +59,6 @@ const start = async () => {
     app.log.error(err);
     process.exit(1);
   }
-};
+}
 
 start();
