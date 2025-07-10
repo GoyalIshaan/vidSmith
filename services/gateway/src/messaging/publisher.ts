@@ -3,7 +3,7 @@ import * as amqp from "amqplib";
 const RABBITMQ_URL = process.env.RABBITMQ_URL || "amqp://localhost";
 const EXCHANGE_NAME = "newVideoUploaded";
 const EXCHANGE_TYPE: "fanout" | "topic" = "topic";
-const ROUTING_KEY = "newVideoUploaded";
+const ROUTING_KEY = "transcodeRequest";
 
 // How long to wait for an ACK before retrying (in ms)
 const CONFIRM_TIMEOUT = 1_000;
@@ -12,7 +12,6 @@ const MAX_RETRIES = 3;
 
 interface VideoUploadedMessage {
   videoId: string;
-  bucketName: string;
   s3Key: string;
 }
 

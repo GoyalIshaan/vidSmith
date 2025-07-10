@@ -11,6 +11,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { s3Client } from "../aws/s3Client";
+import { publishNewVideo } from "../messaging/publisher";
 
 export class UploadClient {
   async initiateMultipartUpload(
@@ -106,6 +107,11 @@ export class UploadClient {
       })
       .where(eq(videosTable.id, videoDBID))
       .returning();
+
+    await publishNewVideo({
+      videoId: videoDetailsInDB.id,
+      s3Key: videoDetailsInDB.s3Key,
+    });
 
     return {
       videoDBID: videoDetailsInDB.id,
