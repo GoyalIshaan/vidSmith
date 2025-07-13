@@ -1,6 +1,7 @@
 // services/gateway/index.ts
 import Fastify from "fastify";
 import mercurius from "mercurius";
+import cors from "@fastify/cors";
 import { readFileSync } from "fs";
 import path from "path";
 import "dotenv/config";
@@ -9,12 +10,19 @@ import { UploadClient } from "./clients/uploadClient";
 import { MetadataClient } from "./clients/metadataClient";
 import { resolvers } from "./resolvers";
 import codegenMercurius from "mercurius-codegen";
-import "./types/mercurius";
-import "./types/fastify";
+// Type declarations are automatically loaded by TypeScript
 
 export const DB = drizzle(process.env.DATABASE_URL!);
 
 const app = Fastify({ logger: true });
+
+// Register CORS plugin
+app.register(cors, {
+  origin: ["http://localhost:5173", "http://127.0.0.1:5173"],
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+});
 
 app.decorate("uploadClient", new UploadClient());
 app.decorate("metadataClient", new MetadataClient());

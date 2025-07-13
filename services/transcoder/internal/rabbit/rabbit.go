@@ -5,15 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/GoyalIshaan/vidSmith/services/transcoder/processor"
+	"github.com/GoyalIshaan/vidSmith/services/transcoder/types"
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/streadway/amqp"
 	"go.uber.org/zap"
 )
 
-type TranscodeRequest struct {
-	VideoId    string `json:"videoId"`
-	S3Key      string `json:"s3Key"`
-}
 const prefetchCount = 5
 type Consumer struct {
 	channel *amqp.Channel
@@ -37,10 +37,10 @@ func NewConsumer(channel *amqp.Channel, logger *zap.Logger) (*Consumer, error) {
 
 	// Set prefetch count to 1 to ensure only one un-acked message is processed at a time
 	if err := channel.Qos(prefetchCount, 0, false); err != nil {
-    return nil, fmt.Errorf("qos set: %w", err)
-  }
-
-  return &Consumer{channel: channel, queue: queueName, logger: logger}, nil
+		return nil, fmt.Errorf("qos set: %w", err)
+	}
+	
+	return &Consumer{channel: channel, queue: queueName, logger: logger}, nil
 }
 
 func (c *Consumer) Consume(ctx context.Context, bucketName string, transcodedPrefix string, manifestPrefix string, s3Client *s3.S3) error {
@@ -92,7 +92,7 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery, bucketName strin
 	}()
 
 	// Unmarshal the message body into a TranscodeRequest struct
-	var req TranscodeRequest
+	var req types.TranscodeRequest
 	if err := json.Unmarshal(d.Body, &req); err != nil {
 		c.logger.Error("invalid message", zap.Error(err), zap.ByteString("body", d.Body))
 		d.Nack(false, false) // discard bad message
@@ -101,9 +101,25 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery, bucketName strin
 
 	c.logger.Info("received transcode request", zap.String("videoId", req.VideoId), zap.String("s3Key", req.S3Key))
 
-	// TODO: Implement transcoding logic
+	// create an AWS session
+	session, err := session.NewSession(&aws.Config{
+		Region: s3Client.Config.Region,
+	})
 
-	// Upload transcoded video to S3
-	
-	d.Ack(false) // acknowledge message
+	if err != nil {
+        c.logger.Error("failed to create AWS session", zap.Error(err))
+        d.Nack(false, true) // transient error
+        return
+    }
+
+	// invoking the transcoding service
+
+	if err := processor.Process(ctx, req, bucketName, transcodedPrefix, manifestPrefix, s3Client, session); err != nil {
+		c.logger.Error("transcoding failed", zap.Error(err))
+        d.Nack(false, true) // requeue for retry
+        return
+	}
+
+	d.Ack(false)
+    c.logger.Info("transcode request completed", zap.String("videoId", req.VideoId))
 }
