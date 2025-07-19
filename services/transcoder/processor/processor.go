@@ -19,7 +19,7 @@ func Process(context context.Context, request types.TranscodeRequest, bucketName
 	logger := zap.L().With(zap.String("videoId", request.VideoId));
 
 	// building the S3 keys
-	originalKey := fmt.Sprintf("%s/%s.mp4", "original", request.VideoId)
+	originalKey := fmt.Sprintf("%s/%s", "originals", request.S3Key)
 	key1080 := fmt.Sprintf("%s/av1/1080p/%s.mp4", transcodedPrefix, request.VideoId)
 	key720  := fmt.Sprintf("%s/av1/720p/%s.mp4", transcodedPrefix, request.VideoId)
 	key480  := fmt.Sprintf("%s/av1/480p/%s.mp4", transcodedPrefix, request.VideoId)

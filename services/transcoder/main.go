@@ -51,8 +51,8 @@ func main() {
 		cancel()
 	}()
 	
-	err = rabbitConsumer.Consume(ctx, config.BucketName, config.TranscodedPrefix, config.ManifestPrefix, s3Client)
-	
+	logger.Info("transcoder service started, waiting for messages...")
+	err = rabbitConsumer.Consume(ctx, config.BucketName, config.TranscodedPrefix, config.ManifestPrefix, s3Client, session)
 	if err != nil {
 		logger.Error("consumer error", zap.Error(err))
 	}

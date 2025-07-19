@@ -24,12 +24,12 @@ export class UploadClient {
       throw new Error("Size must be greater than 0");
     }
 
-    const s3Key = `${videoName}/${fileName}-${Date.now()}`;
+    const s3Key = `${videoName}-${fileName}-${Date.now()}`;
 
     try {
       const command = new CreateMultipartUploadCommand({
         Bucket: process.env.AWS_BUCKET_NAME,
-        Key: s3Key,
+        Key: `originals/${s3Key}`,
         ContentType: contentType,
         ACL: "private",
       });
@@ -65,7 +65,7 @@ export class UploadClient {
   ) {
     const command = new UploadPartCommand({
       Bucket: process.env.AWS_BUCKET_NAME,
-      Key: key,
+      Key: `originals/${key}`,
       UploadId: uploadId,
       PartNumber: partNumber,
     });
@@ -91,7 +91,7 @@ export class UploadClient {
 
     const command = new CompleteMultipartUploadCommand({
       Bucket: process.env.AWS_BUCKET_NAME,
-      Key: key,
+      Key: `originals/${key}`,
       UploadId: uploadId,
       MultipartUpload: {
         Parts: sortedParts,
@@ -124,7 +124,7 @@ export class UploadClient {
     try {
       const abortCmd = new AbortMultipartUploadCommand({
         Bucket: process.env.AWS_BUCKET_NAME,
-        Key: key,
+        Key: `originals/${key}`,
         UploadId: uploadId,
       });
       await s3Client.send(abortCmd);

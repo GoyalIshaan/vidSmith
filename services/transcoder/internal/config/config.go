@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/spf13/viper"
+	"github.com/subosito/gotenv"
 )
 
 // Config holds all configuration required by the transcoder service
@@ -27,6 +28,9 @@ type Config struct {
 
 // LoadConfig reads configuration from environment variables (via Viper)
 func LoadConfig() (*Config, error) {
+	// Load .env file if it exists
+	gotenv.Load()
+
 	viper.AutomaticEnv()
 
 	// Defaults
