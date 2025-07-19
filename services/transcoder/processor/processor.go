@@ -25,9 +25,24 @@ func Process(context context.Context, request types.TranscodeRequest, bucketName
 	key480  := fmt.Sprintf("%s/av1/480p/%s.mp4", transcodedPrefix, request.VideoId)
 	manifestKey := fmt.Sprintf("%s/%s.m3u8", manifestPrefix, request.VideoId)
 
+	// DEBUG: Log all S3 paths and request details
+	logger.Info("DEBUG: Starting transcode process", 
+		zap.String("bucketName", bucketName),
+		zap.String("originalKey", originalKey),
+		zap.String("requestS3Key", request.S3Key),
+		zap.String("videoId", request.VideoId),
+		zap.String("region", *s3Client.Config.Region),
+	)
+
 	// helper to transcode one resolution
 	transcoder := func(resolution string, key string, scale string) error {
 		logger.Info("transcoding video", zap.String("resolution", resolution));
+
+		// DEBUG: Log S3 GetObject attempt
+		logger.Info("DEBUG: Attempting to get S3 object", 
+			zap.String("bucket", bucketName),
+			zap.String("key", originalKey),
+		)
 
 		// stream original video from S3
 		originalVideo, err := s3Client.GetObject(&s3.GetObjectInput{
@@ -36,30 +51,64 @@ func Process(context context.Context, request types.TranscodeRequest, bucketName
 		})
 
 		if err != nil {
+			logger.Error("DEBUG: S3 GetObject failed", 
+				zap.String("bucket", bucketName),
+				zap.String("key", originalKey),
+				zap.Error(err),
+			)
 			return fmt.Errorf("failed to get original video: %w", err)
 		}
+
+		// DEBUG: Log successful S3 retrieval
+		logger.Info("DEBUG: S3 GetObject successful", 
+			zap.String("bucket", bucketName),
+			zap.String("key", originalKey),
+			zap.Int64("contentLength", *originalVideo.ContentLength),
+			zap.String("contentType", *originalVideo.ContentType),
+			zap.String("etag", *originalVideo.ETag),
+		)
+
 		// so that the io.ReadCloser is closed when the function returns
 		defer originalVideo.Body.Close();
+
+		// DEBUG: Check if video content is empty or too small
+		if *originalVideo.ContentLength < 1024 { // Less than 1KB
+			logger.Error("DEBUG: Video file too small, likely empty or invalid", 
+				zap.Int64("contentLength", *originalVideo.ContentLength),
+			)
+			return fmt.Errorf("video file too small (%d bytes), likely empty or invalid", *originalVideo.ContentLength)
+		}
 
 		// pipe into FFmpeg stdin
 		prIn, pwIn := io.Pipe();
 		go func() {
 			defer pwIn.Close();
-			io.Copy(pwIn, originalVideo.Body);
+			bytesCopied, err := io.Copy(pwIn, originalVideo.Body);
+			logger.Info("DEBUG: Finished copying video data to FFmpeg", 
+				zap.Int64("bytesCopied", bytesCopied),
+				zap.Error(err),
+			)
 		}();
+
+		// DEBUG: Log FFmpeg command
+		ffmpegArgs := []string{
+			"-i", "pipe:0",
+			"-vf", "scale="+scale,
+			"-c:v", "libaom-av1",
+			"-f", "mp4", "-movflags", "frag_keyframe+empty_moov",
+			"pipe:1",
+		}
+		logger.Info("DEBUG: FFmpeg command", 
+			zap.Strings("args", ffmpegArgs),
+			zap.String("resolution", resolution),
+		)
 
 		// FFmpeg command
     	//    -i pipe:0         (read from stdin)
     	//    -vf scale=WxH     (scale filter)
     	//    -c:v libaom-av1   (AV1 codec)
     	//    -f mp4 -movflags frag_keyframe+empty_moov pipe:1
-		cmd := exec.CommandContext(context, "ffmpeg",
-			"-i", "pipe:0",
-			"-vf", "scale="+scale,
-			"-c:v", "libaom-av1",
-			"-f", "mp4", "-movflags", "frag_keyframe+empty_moov",
-			"pipe:1",
-		)
+		cmd := exec.CommandContext(context, "ffmpeg", ffmpegArgs...)
 		
 		cmd.Stdin = prIn;
 
@@ -67,11 +116,18 @@ func Process(context context.Context, request types.TranscodeRequest, bucketName
 		prOut, pwOut := io.Pipe();
 		cmd.Stdout = pwOut;
 
+		// DEBUG: Capture FFmpeg stderr for error messages
+		var ffmpegErr strings.Builder
+		cmd.Stderr = &ffmpegErr
+
 		// Start FFmpeg
 		if err := cmd.Start(); err != nil {
 			pwOut.Close();
+			logger.Error("DEBUG: Failed to start FFmpeg", zap.Error(err))
 			return fmt.Errorf("failed to start FFmpeg: %w", err);
 		}
+
+		logger.Info("DEBUG: FFmpeg started successfully", zap.String("resolution", resolution))
 
 		uploader := s3manager.NewUploader(session, func (u *s3manager.Uploader) {
 			u.PartSize = 5 * 1024 * 1024;
@@ -82,20 +138,42 @@ func Process(context context.Context, request types.TranscodeRequest, bucketName
 
 		go func() {
 			defer pwOut.Close()
+			logger.Info("DEBUG: Starting S3 upload", 
+				zap.String("bucket", bucketName),
+				zap.String("key", key),
+				zap.String("resolution", resolution),
+			)
 			_, err := uploader.Upload(&s3manager.UploadInput{
 				Bucket: aws.String(bucketName),
 				Key:    aws.String(key),
 				Body:   prOut,
 			})
-			uploadErrCh <- fmt.Errorf("s3 Upload [%s]: %w", resolution, err)
+			if err != nil {
+				logger.Error("DEBUG: S3 upload failed", 
+					zap.String("bucket", bucketName),
+					zap.String("key", key),
+					zap.Error(err),
+				)
+			} else {
+				logger.Info("DEBUG: S3 upload completed", 
+					zap.String("bucket", bucketName),
+					zap.String("key", key),
+				)
+			}
+			uploadErrCh <- err
 		}()
 
 		if err := cmd.Wait(); err != nil {
-			return fmt.Errorf("ffmpeg wait [%s]: %w", resolution, err)
+			logger.Error("DEBUG: FFmpeg failed", 
+				zap.String("resolution", resolution),
+				zap.Error(err),
+				zap.String("ffmpegStderr", ffmpegErr.String()),
+			)
+			return fmt.Errorf("ffmpeg wait [%s]: %w (stderr: %s)", resolution, err, ffmpegErr.String())
 		}
 		
 		if err := <-uploadErrCh; err != nil {
-			return err
+			return fmt.Errorf("s3 Upload [%s]: %w", resolution, err)
 		}
 		
 		logger.Info("completed transcode", zap.String("resolution", resolution), zap.String("key", key))
