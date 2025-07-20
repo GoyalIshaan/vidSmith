@@ -18,17 +18,16 @@ import (
 	"go.uber.org/zap"
 )
 
-// renditionSpec defines the parameters for each video rendition.
+// defines the parameters for each video rendition.
 type renditionSpec struct {
 	Name       string
 	Scale      string
-	CRF        string // AV1 Constant Quality (CQ) value. Used when -b:v is 0.
-	Bitrate    string // Target bitrate for VBR mode.
-	MaxBitrate string // Max bitrate for VBR mode.
-	BufSize    string // Buffer size for VBR mode.
+	CRF        string // tells ffmpeg to aim for a certain visual quality level
+	Bitrate    string
+	MaxBitrate string
+	BufSize    string
 }
 
-// renditions is a slice containing the specifications for the different output qualities.
 var renditions = []renditionSpec{
 	{Name: "1080p", Scale: "1920x1080", CRF: "32", Bitrate: "4000k", MaxBitrate: "5000k", BufSize: "8000k"},
 	{Name: "720p", Scale: "1280x720", CRF: "34", Bitrate: "2500k", MaxBitrate: "3200k", BufSize: "5000k"},
@@ -42,10 +41,8 @@ func Process(
 	bucketName, transcodedPrefix, manifestPrefix string,
 	s3Client *s3.S3,
 	sess *session.Session,
+	logger *zap.Logger,
 ) error {
-	logger := zap.L().With(zap.String("videoId", request.VideoId))
-
-	// --- Added Log ---
 	// Confirm that the Process function has been entered.
 	logger.Info("processor.Process function entered")
 
@@ -55,20 +52,9 @@ func Process(
 	}
 	manifestKey := fmt.Sprintf("%s/%s.m3u8", manifestPrefix, request.VideoId)
 
-	logger.Info("start transcode",
-		zap.String("bucket", bucketName),
-		zap.String("originalKey", originalKey),
-		zap.String("videoId", request.VideoId),
-		zap.String("region", aws.StringValue(s3Client.Config.Region)),
-	)
-
-	// --- FIX: Download the source file to a temporary local file first. ---
-	// This is more robust than streaming, as it allows ffmpeg to seek and correctly
-	// handle files where metadata (like the 'moov' atom) is at the end.
+	// Download the source file to a temporary local file first
 	tempInputPath, _, err := downloadToTemp(ctx, s3Client, bucketName, originalKey, logger)
 	if err != nil {
-		// --- Enhanced Logging ---
-		// Log the specific error before returning to make debugging clear.
 		logger.Error("failed to download original file from S3", zap.Error(err), zap.String("s3Key", originalKey))
 		return fmt.Errorf("failed to download original file: %w", err)
 	}
@@ -82,7 +68,7 @@ func Process(
 
 	// Transcode for each rendition using the downloaded local file.
 	for _, r := range renditions {
-		if err := transcodeOne(ctx, uploader, bucketName, tempInputPath, keyFor(r), r, logger); err != nil {
+		if err := transcodeOneRendition(ctx, uploader, bucketName, tempInputPath, keyFor(r), r, logger); err != nil {
 			return fmt.Errorf("rendition %s: %w", r.Name, err)
 		}
 	}
@@ -108,9 +94,7 @@ func Process(
 	return nil
 }
 
-// transcodeOne handles the transcoding of a single rendition.
-// It reads from a local file path and uploads the result to S3.
-func transcodeOne(
+func transcodeOneRendition(
 	ctx context.Context,
 	uploader *s3manager.Uploader,
 	bucketName, tempInputPath, outKey string,
@@ -120,24 +104,20 @@ func transcodeOne(
 	log := logger.With(zap.String("rendition", r.Name))
 	log.Info("transcoding start", zap.String("scale", r.Scale), zap.String("outKey", outKey))
 
-	// Create a pipe to stream ffmpeg's output directly to the S3 uploader.
-	// This avoids saving the transcoded file to disk.
+	// pipe to stream ffmpeg's output directly to the S3 uploader
 	prOut, pwOut := io.Pipe()
 
-	// Build the ffmpeg command arguments, passing the local input path.
 	ffmpegArgs := buildFFmpegArgs(r, tempInputPath)
-	log.Info("ffmpeg args", zap.Strings("args", ffmpegArgs))
 
-	cmd := exec.CommandContext(ctx, "ffmpeg", ffmpegArgs...)
-	cmd.Stdout = pwOut // Pipe ffmpeg's standard output to our pipe writer.
-	cmd.Stdin = nil    // No standard input is needed as we provide a file path.
+	ffmpegCommand := exec.CommandContext(ctx, "ffmpeg", ffmpegArgs...) // prepares an external command to run by the system
+	ffmpegCommand.Stdout = pwOut // Pipe ffmpeg's standard output to our pipe writer.
+	ffmpegCommand.Stdin = nil    // No standard input is needed as we provide a file path.
 
 	// Capture stderr for debugging purposes.
 	var stderrBuf bytes.Buffer
-	cmd.Stderr = &stderrBuf
+	ffmpegCommand.Stderr = &stderrBuf
 
 	// Start the S3 upload in a separate goroutine.
-	// It will read from the pipe as ffmpeg writes to it.
 	uploadErrCh := make(chan error, 1)
 	go func() {
 		defer close(uploadErrCh)
@@ -158,23 +138,15 @@ func transcodeOne(
 	start := time.Now()
 	log.Info("ffmpeg started")
 
-	// Run ffmpeg and wait for it to complete.
-	waitErr := cmd.Run()
+	ffmpegError := ffmpegCommand.Run()
 
-	// After ffmpeg finishes (or fails), close the pipe writer.
-	// This signals EOF to the pipe reader in the upload goroutine.
 	pwOut.Close()
 
-	if waitErr != nil {
-		log.Error("ffmpeg failed",
-			zap.Error(waitErr),
-			zap.String("stderr", truncate(stderrBuf.String(), 8000)),
-		)
-		// If ffmpeg fails, the upload might still be running. Closing the reader
-		// with an error will interrupt it.
-		prOut.CloseWithError(waitErr)
-		return fmt.Errorf("ffmpeg (%s): %w\nstderr:\n%s",
-			r.Name, waitErr, stderrBuf.String())
+	if ffmpegError != nil {
+		log.Error("ffmpeg failed", zap.Error(ffmpegError), zap.String("stderr", truncateError(stderrBuf.String(), 8000)),)
+
+		prOut.CloseWithError(ffmpegError)
+		return fmt.Errorf("ffmpeg (%s): %w\nstderr:\n%s", r.Name, ffmpegError, stderrBuf.String())
 	}
 
 	// Wait for the upload to complete and check for any errors.
@@ -189,7 +161,6 @@ func transcodeOne(
 	return nil
 }
 
-// buildFFmpegArgs constructs the command-line arguments for ffmpeg.
 func buildFFmpegArgs(r renditionSpec, inputPath string) []string {
 	return []string{
 		"-hide_banner",
@@ -218,7 +189,6 @@ func buildFFmpegArgs(r renditionSpec, inputPath string) []string {
 	}
 }
 
-// downloadToTemp downloads an object from S3 to a local temporary file.
 func downloadToTemp(ctx context.Context, s3Client *s3.S3, bucket, key string, logger *zap.Logger) (string, int64, error) {
 	out, err := s3Client.GetObjectWithContext(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(bucket),
@@ -244,15 +214,11 @@ func downloadToTemp(ctx context.Context, s3Client *s3.S3, bucket, key string, lo
 		return "", 0, fmt.Errorf("copy to temp file: %w", copyErr)
 	}
 
-	logger.Info("downloaded original to temp file",
-		zap.String("tmpPath", tmpFile.Name()),
-		zap.Int64("bytes", written),
-	)
+	logger.Info("downloaded original to temp file")
 	return tmpFile.Name(), written, nil
 }
 
-// truncate shortens a string to a maximum length for cleaner logging.
-func truncate(s string, max int) string {
+func truncateError(s string, max int) string {
 	if len(s) <= max {
 		return s
 	}
