@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/GoyalIshaan/vidSmith/services/transcoder/processor"
 	"github.com/GoyalIshaan/vidSmith/services/transcoder/types"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
@@ -22,10 +21,10 @@ type Consumer struct {
 }
 
 func NewConsumer(channel *amqp.Channel, logger *zap.Logger) (*Consumer, error) {
-	queueName := "transcodeRequest"
+	queueName := "captionsRequest"
 	exchangeName := "newVideoUploaded"
 	exchangeType := "topic"
-	routingKey := "transcodeRequest"
+	routingKey := "captionsRequest"
 
 	// Declare the exchange (same as gateway)
 	if err := channel.ExchangeDeclare(
@@ -63,7 +62,7 @@ func NewConsumer(channel *amqp.Channel, logger *zap.Logger) (*Consumer, error) {
 		return nil, fmt.Errorf("queue bind: %w", err)
 	}
 
-	// Set prefetch count to 1 to ensure only one un-acked message is processed at a time
+	// sets the prefetch count
 	if err := channel.Qos(prefetchCount, 0, false); err != nil {
 		return nil, fmt.Errorf("qos set: %w", err)
 	}
@@ -119,6 +118,7 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery, bucketName strin
 		}
 	}()
 
+	// TODO: Change this
 	// Unmarshal the message body into a TranscodeRequest struct
 	var req types.TranscodeRequest
 	if err := json.Unmarshal(d.Body, &req); err != nil {
@@ -132,11 +132,6 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery, bucketName strin
 	// Use the existing s3Client's session instead of creating a new one
 	// invoking the transcoding service
 
-	if err := processor.Process(ctx, req, bucketName, transcodedPrefix, manifestPrefix, s3Client, awsSession, c.logger); err != nil {
-		c.logger.Error("transcoding failed", zap.Error(err))
-		d.Nack(false, true) // requeue for retry
-		return
-	}
 
 	d.Ack(false)
 	c.logger.Info("transcode request completed", zap.String("videoId", req.VideoId))
