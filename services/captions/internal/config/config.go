@@ -11,12 +11,17 @@ type Config struct {
 	AmqpURL     string
 	BucketName string
 	AWSRegion   string
+	CaptionsJobPrefix string
+	CaptionsPrefix string
 }
 
 func LoadConfig() (*Config, error) {
 	gotenv.Load()
 
 	viper.AutomaticEnv()
+
+	viper.SetDefault("CAPTIONS_PREFIX", "captions/srt")
+	viper.SetDefault("CAPTIONS_JOB_PREFIX", "captions/job")
 
 	// Required keys
 	required := []string{
@@ -34,6 +39,8 @@ func LoadConfig() (*Config, error) {
 		AmqpURL:      viper.GetString("AMQP_URL"),
 		BucketName:   viper.GetString("BUCKET_NAME"),
 		AWSRegion:    viper.GetString("AWS_REGION"),
+		CaptionsJobPrefix: viper.GetString("CAPTIONS_JOB_PREFIX"),
+		CaptionsPrefix: viper.GetString("CAPTIONS_PREFIX"),
 	}
 	return cfg, nil
 }

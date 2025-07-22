@@ -5,7 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/GoyalIshaan/vidSmith/services/transcoder/types"
+	"github.com/GoyalIshaan/vidSmith/tree/master/services/captions/processor"
+	"github.com/GoyalIshaan/vidSmith/tree/master/services/captions/types"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/streadway/amqp"
@@ -70,7 +71,7 @@ func NewConsumer(channel *amqp.Channel, logger *zap.Logger) (*Consumer, error) {
 	return &Consumer{channel: channel, queue: queueName, logger: logger}, nil
 }
 
-func (c *Consumer) Consume(ctx context.Context, bucketName string, transcodedPrefix string, manifestPrefix string, s3Client *s3.S3, awsSession *session.Session) error {
+func (c *Consumer) Consume(ctx context.Context, bucketName, captionsPrefix, transcriberJobPrefix string, s3Client *s3.S3, awsSession *session.Session) error {
 	msgs, err := c.channel.Consume(
 		c.queue,
 		"",    // consumer tag
@@ -102,13 +103,13 @@ func (c *Consumer) Consume(ctx context.Context, bucketName string, transcodedPre
 
 			go func(delivery amqp.Delivery) {
 				defer func() { <-semaphore }() // Release semaphore slot
-				c.handle(ctx, delivery, bucketName, transcodedPrefix, manifestPrefix, s3Client, awsSession)
+				c.handle(ctx, delivery, bucketName, captionsPrefix, transcriberJobPrefix, s3Client, awsSession)
 			}(d)
 		}
 	}
 }
 
-func (c *Consumer) handle(ctx context.Context, d amqp.Delivery, bucketName string, transcodedPrefix string, manifestPrefix string, s3Client *s3.S3, awsSession *session.Session) {
+func (c *Consumer) handle(ctx context.Context, d amqp.Delivery, bucketName, captionsPrefix, transcriberJobPrefix string, s3Client *s3.S3, awsSession *session.Session) {
 	// TODO: Implement message handling logic
 	defer func() {
 		// Recover from panic and nack the message
@@ -120,7 +121,7 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery, bucketName strin
 
 	// TODO: Change this
 	// Unmarshal the message body into a TranscodeRequest struct
-	var req types.TranscodeRequest
+	var req types.CaptionsRequest
 	if err := json.Unmarshal(d.Body, &req); err != nil {
 		c.logger.Error("invalid message", zap.Error(err), zap.ByteString("body", d.Body))
 		d.Nack(false, false) // discard bad message
@@ -131,7 +132,9 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery, bucketName strin
 
 	// Use the existing s3Client's session instead of creating a new one
 	// invoking the transcoding service
+	if err := processor.Process(ctx, req, bucketName, captionsPrefix, transcriberJobPrefix, s3Client, awsSession, c.logger); err !=nil {
 
+	}
 
 	d.Ack(false)
 	c.logger.Info("transcode request completed", zap.String("videoId", req.VideoId))

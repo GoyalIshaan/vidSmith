@@ -30,7 +30,7 @@ type TranscriptItem struct {
 }
 
 
-func Proces(
+func Process(
 	context context.Context, 
 	request types.CaptionsRequest,
 	bucketName, captionsPrefix, transcriberJobPrefix string, 
@@ -175,4 +175,3 @@ func formatTime(sec float64) string {
     ms := int(math.Mod(sec, 1.0) * 1000)
     return fmt.Sprintf("%02d:%02d:%02d,%03d", h, m, s, ms)
 }
-
