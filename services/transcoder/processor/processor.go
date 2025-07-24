@@ -45,11 +45,12 @@ func Process(
 ) error {
 	// Confirm that the Process function has been entered.
 	logger.Info("processor.Process function entered")
-
-	originalKey := fmt.Sprintf("%s/%s", "originals", request.S3Key)
+	
 	keyFor := func(r renditionSpec) string {
 		return fmt.Sprintf("%s/av1/%s/%s.mp4", transcodedPrefix, r.Name, request.VideoId)
 	}
+
+	originalKey := fmt.Sprintf("%s/%s", "originals", request.S3Key)
 	manifestKey := fmt.Sprintf("%s/%s.m3u8", manifestPrefix, request.VideoId)
 
 	// Download the source file to a temporary local file first

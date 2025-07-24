@@ -38,7 +38,9 @@ func main() {
 	}
 	defer rabbitChannel.Close()
 
-	rabbitConsumer, err := rabbit.NewConsumer(rabbitChannel, logger)
+	
+
+	rabbitConsumer, err := rabbit.NewConsumer(rabbitChannel, logger, config.BucketName, config.CaptionsPrefix, config.TranscriberJobPrefix, s3Client)
 	if err != nil {
 		panic("failed to create RabbitMQ consumer: " + err.Error())
 	}
@@ -52,7 +54,7 @@ func main() {
 	}()
 	
 	logger.Info("transcoder service started, waiting for messages...")
-	err = rabbitConsumer.Consume(ctx, config.BucketName, config.CaptionsPrefix, config.CaptionsJobPrefix, s3Client, session)
+	err = rabbitConsumer.Consume(ctx)
 	if err != nil {
 		logger.Error("consumer error", zap.Error(err))
 	}

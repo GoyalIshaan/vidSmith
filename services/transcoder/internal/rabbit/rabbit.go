@@ -25,7 +25,7 @@ func NewConsumer(channel *amqp.Channel, logger *zap.Logger) (*Consumer, error) {
 	queueName := "transcodeRequest"
 	exchangeName := "newVideoUploaded"
 	exchangeType := "topic"
-	routingKey := "transcodeRequest"
+	routingKey := "videoUploaded"
 
 	// Declare the exchange (same as gateway)
 	if err := channel.ExchangeDeclare(

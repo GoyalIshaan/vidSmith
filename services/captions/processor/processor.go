@@ -15,7 +15,6 @@ import (
 	transcribe "github.com/aws/aws-sdk-go-v2/service/transcribe"
 	transcribeTypes "github.com/aws/aws-sdk-go-v2/service/transcribe/types"
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"go.uber.org/zap"
 )
@@ -35,12 +34,11 @@ func Process(
 	request types.CaptionsRequest,
 	bucketName, captionsPrefix, transcriberJobPrefix string, 
 	s3Client *s3.S3, 
-	awsSession *session.Session,
 	logger *zap.Logger,
 ) error{
 	cfg, err := config.LoadDefaultConfig(context)
 	if err != nil {
-		return fmt.Errorf("Couldn't load config cause of : %w", err)
+		return fmt.Errorf("couldn't load config cause of : %w", err)
 	}
 
 	transcriber := transcribe.NewFromConfig(cfg);
@@ -64,26 +62,34 @@ func Process(
 
 	logger.Info("Transcription Job Started")
 
+    // poll the job for completion
+    timeout := 0
 	for {
+        if (timeout == 3600) {
+            return fmt.Errorf("transcription job ran for over an hour")
+        }
+        
         select {
-        case <-context.Done():
-            return context.Err()
-        case <-time.After(5 * time.Second):
-            out, err := transcriber.GetTranscriptionJob(context, &transcribe.GetTranscriptionJobInput{
-                TranscriptionJobName: aws.String(jobName),
-            })
-            if err != nil {
-                return fmt.Errorf("get transcription job: %w", err)
-            }
-            status := string(out.TranscriptionJob.TranscriptionJobStatus)
-            switch status {
-            case "COMPLETED":
-                logger.Info("transcription completed", zap.String("jobName", jobName))
-                goto DOWNLOAD
-            case "FAILED":
-                return fmt.Errorf("transcription failed: %s",
-                    aws.StringValue(out.TranscriptionJob.FailureReason))
-            default:
+            case <-context.Done(): return context.Err()
+            case <-time.After(5 * time.Second): {
+                timeout += 5
+                out, err := transcriber.GetTranscriptionJob(context, &transcribe.GetTranscriptionJobInput{
+                    TranscriptionJobName: aws.String(jobName),
+                })
+                if err != nil {
+                    return fmt.Errorf("get transcription job: %w", err)
+                }
+                status := string(out.TranscriptionJob.TranscriptionJobStatus)
+                switch status {
+                    case "COMPLETED": {
+                        logger.Info("transcription completed", zap.String("jobName", jobName))
+                        goto DOWNLOAD
+                    }
+                    case "FAILED": {
+                        return fmt.Errorf("transcription failed: %s", aws.StringValue(out.TranscriptionJob.FailureReason))
+                    }
+                    default:
+                }
             }
         }
     }
@@ -94,9 +100,11 @@ func Process(
         Bucket: aws.String(bucketName),
         Key:    aws.String(jsonKey),
     })
+
     if err != nil {
         return fmt.Errorf("download transcript JSON: %w", err)
     }
+
     defer obj.Body.Close()
 
     var data struct {
@@ -130,7 +138,6 @@ func Process(
     return nil
 }
 
-// toSRT takes the sequence of Transcribe items and emits valid SRT bytes.
 func toSRT(items []TranscriptItem) ([]byte, error) {
     var buf bytes.Buffer
     seq := 1
@@ -150,16 +157,29 @@ func toSRT(items []TranscriptItem) ([]byte, error) {
 
     for _, it := range items {
         switch it.Type {
-        case "pronunciation":
-            st, _ := strconv.ParseFloat(it.StartTime, 64)
-            et, _ := strconv.ParseFloat(it.EndTime, 64)
-            if len(words) == 0 {
-                start = st
+            case "pronunciation": {
+                st, err1 := strconv.ParseFloat(it.StartTime, 64)
+                et, err2 := strconv.ParseFloat(it.EndTime, 64)
+                if err1 != nil || err2 != nil {
+                    continue
+                }
+                if len(it.Alternatives) == 0 {
+                    continue
+                }
+                if len(words) == 0 {
+                    start = st
+                }
+                end = et
+                words = append(words, it.Alternatives[0].Content)
+                break
             }
-            end = et
-            words = append(words, it.Alternatives[0].Content)
-        case "punctuation":
-            flush(it.Alternatives[0].Content)
+            case "punctuation": {
+                if len(it.Alternatives) == 0 {
+                    continue
+                }
+                flush(it.Alternatives[0].Content)
+                break
+            }
         }
     }
     // final flush

@@ -5,8 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/GoyalIshaan/vidSmith/tree/master/services/captions/processor"
-	"github.com/GoyalIshaan/vidSmith/tree/master/services/captions/types"
+	"github.com/GoyalIshaan/vidSmith/tree/master/services/censor/types"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/streadway/amqp"
 	"go.uber.org/zap"
@@ -30,7 +29,7 @@ func NewConsumer(
 	logger *zap.Logger,
 	bucketName, captionsPrefix, transcriberJobPrefix string,
 	s3Client *s3.S3,
-	) (*Consumer, error) {
+) (*Consumer, error) {
 	queueName := "captionsRequest"
 	exchangeName := "newVideoUploaded"
 	exchangeType := "topic"
@@ -139,7 +138,7 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery) {
 
 	// TODO: Change this
 	// Unmarshal the message body into a TranscodeRequest struct
-	var req types.CaptionsRequest
+	var req types.CensorRequest
 	if err := json.Unmarshal(d.Body, &req); err != nil {
 		c.logger.Error("invalid message", zap.Error(err), zap.ByteString("body", d.Body))
 		d.Nack(false, false) // discard bad message
@@ -148,26 +147,17 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery) {
 
 	c.logger.Info("received transcode request", zap.String("videoId", req.VideoId), zap.String("s3Key", req.S3Key))
 
-	// Use the existing s3Client's session instead of creating a new one
-	// invoking the transcoding service
-	if err := processor.Process(ctx, req, c.bucketName, c.captionsPrefix, c.transcriberJobPrefix, c.s3Client, c.logger); err !=nil {
-		c.logger.Error("transcoding failed", zap.Error(err))
-		d.Nack(false, true) // requeue for retry
-		return
-	}
+	// // Use the existing s3Client's session instead of creating a new one
+	// // invoking the transcoding service
+	// if err := processor.Process(ctx, req, c.bucketName, c.captionsPrefix, c.transcriberJobPrefix, c.s3Client, c.logger); err !=nil {
+	// 	c.logger.Error("transcoding failed", zap.Error(err))
+	// 	d.Nack(false, true) // requeue for retry
+	// 	return
+	// }
 
 	d.Ack(false)
 
-	event := types.CaptionsReadyEvent{
-		VideoId: req.VideoId,
-		SRTKey: fmt.Sprintf("%s/%s.srt", c.captionsPrefix, req.VideoId),
-		S3Key: req.S3Key,
-	}
 
-	err := c.emit("startCensor", event)
-	if err != nil {
-    	// handle error
-	}
 	c.logger.Info("transcode request completed", zap.String("videoId", req.VideoId))
 }
 

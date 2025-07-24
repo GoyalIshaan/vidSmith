@@ -3,7 +3,7 @@ import * as amqp from "amqplib";
 const RABBITMQ_URL = process.env.RABBITMQ_URL || "amqp://localhost";
 const EXCHANGE_NAME = "newVideoUploaded";
 const EXCHANGE_TYPE: "fanout" | "topic" = "topic";
-const ROUTING_KEY = "transcodeRequest";
+const ROUTING_KEY = "videoUploaded";
 
 // How long to wait for an ACK before retrying (in ms)
 const CONFIRM_TIMEOUT = 1_000;
