@@ -5,3 +5,8 @@ type CensorRequest struct {
 	S3Key      string `json:"s3Key"`
 	SRTKey      string `json:"srtKey"`
 }
+
+type GeminiReturns struct {
+	Result bool  `json:"result"`
+	Error  error `json:"error"`
+}

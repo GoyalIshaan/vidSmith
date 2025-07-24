@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/GoyalIshaan/vidSmith/tree/master/services/censor/processor"
 	"github.com/GoyalIshaan/vidSmith/tree/master/services/censor/types"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/streadway/amqp"
@@ -19,15 +20,13 @@ type Consumer struct {
 	exchange string
 	logger  *zap.Logger
 	bucketName string
-	captionsPrefix string
-	transcriberJobPrefix string
 	s3Client *s3.S3
 }
 
 func NewConsumer(
 	channel *amqp.Channel, 
 	logger *zap.Logger,
-	bucketName, captionsPrefix, transcriberJobPrefix string,
+	bucketName, srtKey string,
 	s3Client *s3.S3,
 ) (*Consumer, error) {
 	queueName := "captionsRequest"
@@ -81,9 +80,7 @@ func NewConsumer(
 		queue: queueName, 
 		exchange: exchangeName,
 		logger: logger,
-		bucketName: bucketName,
-		captionsPrefix: captionsPrefix,
-		transcriberJobPrefix: transcriberJobPrefix,
+		bucketName: bucketName,		
 		s3Client: s3Client,
 		}, nil
 }
@@ -147,18 +144,21 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery) {
 
 	c.logger.Info("received transcode request", zap.String("videoId", req.VideoId), zap.String("s3Key", req.S3Key))
 
-	// // Use the existing s3Client's session instead of creating a new one
-	// // invoking the transcoding service
-	// if err := processor.Process(ctx, req, c.bucketName, c.captionsPrefix, c.transcriberJobPrefix, c.s3Client, c.logger); err !=nil {
-	// 	c.logger.Error("transcoding failed", zap.Error(err))
-	// 	d.Nack(false, true) // requeue for retry
-	// 	return
-	// }
+	// Use the existing s3Client's session instead of creating a new one
+	// invoking the transcoding services
+	result, err := processor.Process(ctx,  c.bucketName, req.SRTKey, c.s3Client, c.logger)
+	if err !=nil {
+		c.logger.Error("transcoding failed", zap.Error(err))
+		d.Nack(false, true) // requeue for retry
+		return
+	}
 
 	d.Ack(false)
 
 
-	c.logger.Info("transcode request completed", zap.String("videoId", req.VideoId))
+	if result {
+		c.logger.Info("transcode request completed", zap.String("videoId", req.VideoId))
+	}
 }
 
 func (c *Consumer) emit(topic string, payload interface{}) error {
