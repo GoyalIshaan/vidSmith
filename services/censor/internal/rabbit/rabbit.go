@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/GoyalIshaan/vidSmith/tree/master/services/censor/processor"
 	"github.com/GoyalIshaan/vidSmith/tree/master/services/censor/types"
@@ -153,12 +154,42 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery) {
 		return
 	}
 
+	// Acknowledge the original processing as successful
 	d.Ack(false)
 
-
-	if result {
-		c.logger.Info("transcode request completed", zap.String("videoId", req.VideoId))
+	event := types.UpdateVideoStatusEvent{
+		VideoId: req.VideoId,
+		Phase: "censor",
+		Censor: result,
 	}
+
+	// Retry the updateServer event emission up to 3 times
+	maxRetries := 3
+	var emitErr error
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		emitErr = c.emit("updateVideoStatus", event)
+		if emitErr == nil {
+			break // Success, exit retry loop
+		}
+		
+		c.logger.Error("failed to publish updateServer event", 
+			zap.Error(emitErr), 
+			zap.Int("attempt", attempt),
+			zap.Int("maxRetries", maxRetries))
+		
+		if attempt < maxRetries {
+			// Wait before retry (exponential backoff)
+			time.Sleep(time.Duration(attempt) * time.Second)
+		}
+	}
+	
+	if emitErr != nil {
+		c.logger.Error("failed to publish updateServer event after all retries", 
+			zap.Error(emitErr), 
+			zap.String("videoId", req.VideoId))
+	}
+
+	c.logger.Info("transcode request completed", zap.String("videoId", req.VideoId))
 }
 
 func (c *Consumer) emit(topic string, payload interface{}) error {
@@ -170,7 +201,7 @@ func (c *Consumer) emit(topic string, payload interface{}) error {
 
     var publishingError error
     switch topic {
-		case "startCensor": {
+		case "updateServer": {
 			publishingError = c.channel.Publish(
     	        c.exchange, // exchange
     	        topic,      // routing key

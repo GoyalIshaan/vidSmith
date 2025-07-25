@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/GoyalIshaan/vidSmith/tree/master/services/captions/processor"
 	"github.com/GoyalIshaan/vidSmith/tree/master/services/captions/types"
@@ -156,18 +157,73 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery) {
 		return
 	}
 
+	// Acknowledge the original processing as successful
 	d.Ack(false)
 
-	event := types.CaptionsReadyEvent{
+	srtKey := fmt.Sprintf("%s/%s.srt", c.captionsPrefix, req.VideoId)
+
+	startCensorEvent := types.CaptionsReadyEvent{
 		VideoId: req.VideoId,
-		SRTKey: fmt.Sprintf("%s/%s.srt", c.captionsPrefix, req.VideoId),
+		SRTKey: srtKey,
 		S3Key: req.S3Key,
 	}
 
-	err := c.emit("startCensor", event)
-	if err != nil {
-    	// handle error
+	// Retry the startCensor event emission up to 3 times
+	maxRetries := 3
+	var emitErr error
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		emitErr = c.emit("startCensor", startCensorEvent)
+		if emitErr == nil {
+			break // Success, exit retry loop
+		}
+		
+		c.logger.Error("failed to publish startCensor event", 
+			zap.Error(emitErr), 
+			zap.Int("attempt", attempt),
+			zap.Int("maxRetries", maxRetries))
+		
+		if attempt < maxRetries {
+			// Wait before retry (exponential backoff)
+			time.Sleep(time.Duration(attempt) * time.Second)
+		}
 	}
+	
+	if emitErr != nil {
+		c.logger.Error("failed to publish startCensor event after all retries", 
+			zap.Error(emitErr), 
+			zap.String("videoId", req.VideoId))
+	}
+
+	updateVideoStatusEvent := types.UpdateVideoStatusEvent{
+		VideoId: req.VideoId,
+		Phase: "startCensor",
+		SRTKey: srtKey,
+	}
+
+	emitErr = nil
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		emitErr = c.emit("updateVideoStatus", updateVideoStatusEvent)
+		if emitErr == nil {
+			break
+		}
+		
+		c.logger.Error("failed to publish serverUpdate event", 
+			zap.Error(emitErr), 
+			zap.Int("attempt", attempt),
+			zap.Int("maxRetries", maxRetries))
+		
+		if attempt < maxRetries {
+			// Wait before retry (exponential backoff)
+			time.Sleep(time.Duration(attempt) * time.Second)
+		}
+	}
+	
+	if emitErr != nil {
+		c.logger.Error("failed to publish serverUpdate event after all retries", 
+			zap.Error(emitErr), 
+			zap.String("videoId", req.VideoId))
+	}
+
 	c.logger.Info("transcode request completed", zap.String("videoId", req.VideoId))
 }
 
@@ -191,6 +247,20 @@ func (c *Consumer) emit(topic string, payload interface{}) error {
 					Body: body,
 				},
 			)
+			break
+		}
+		case "updateVideoStatus": {
+			publishingError = c.channel.Publish(
+    	        c.exchange, // exchange
+    	        topic,      // routing key
+    	        false,      // mandatory
+    	        false,      // immediate
+				amqp.Publishing{
+					ContentType: "application/json",
+					Body: body,
+				},
+			)
+			break
 		}
 		default:
         // handle other topics if needed
