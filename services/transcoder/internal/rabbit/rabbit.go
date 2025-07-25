@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/GoyalIshaan/vidSmith/services/transcoder/processor"
 	"github.com/GoyalIshaan/vidSmith/services/transcoder/types"
@@ -19,6 +20,7 @@ type Consumer struct {
 	channel *amqp.Channel
 	queue   string
 	logger  *zap.Logger
+	exchange string
 }
 
 func NewConsumer(channel *amqp.Channel, logger *zap.Logger) (*Consumer, error) {
@@ -68,7 +70,7 @@ func NewConsumer(channel *amqp.Channel, logger *zap.Logger) (*Consumer, error) {
 		return nil, fmt.Errorf("qos set: %w", err)
 	}
 
-	return &Consumer{channel: channel, queue: queueName, logger: logger}, nil
+	return &Consumer{channel: channel, queue: queueName, logger: logger, exchange: exchangeName}, nil
 }
 
 func (c *Consumer) Consume(ctx context.Context, bucketName string, transcodedPrefix string, manifestPrefix string, s3Client *s3.S3, awsSession *session.Session) error {
@@ -132,12 +134,78 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery, bucketName strin
 	// Use the existing s3Client's session instead of creating a new one
 	// invoking the transcoding service
 
-	if err := processor.Process(ctx, req, bucketName, transcodedPrefix, manifestPrefix, s3Client, awsSession, c.logger); err != nil {
+	manifestKey, err := processor.Process(ctx, req, bucketName, transcodedPrefix, manifestPrefix, s3Client, awsSession, c.logger)
+	if err != nil {
 		c.logger.Error("transcoding failed", zap.Error(err))
 		d.Nack(false, true) // requeue for retry
 		return
 	}
 
 	d.Ack(false)
+
+	updateVideoStatusEvent := types.UpdateVideoStatusEvent{
+		VideoId: req.VideoId,
+		Phase: "transcode",
+		ManifestKey: manifestKey,
+	}
+	maxRetries := 3
+	var emitErr error
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		emitErr = c.emit("updateVideoStatus", updateVideoStatusEvent)
+		if emitErr == nil {
+			break // Success, exit retry loop
+		}
+		
+		c.logger.Error("failed to publish updateVideoStatus event", 
+			zap.Error(emitErr), 
+			zap.Int("attempt", attempt),
+			zap.Int("maxRetries", maxRetries))
+		
+		if attempt < maxRetries {
+			// Wait before retry (exponential backoff)
+			time.Sleep(time.Duration(attempt) * time.Second)
+		}
+	}
+	
+	if emitErr != nil {
+		c.logger.Error("failed to publish updateVideoStatus event after all retries", 
+			zap.Error(emitErr), 
+			zap.String("videoId", req.VideoId))
+	}
+
 	c.logger.Info("transcode request completed", zap.String("videoId", req.VideoId))
+}
+
+func (c *Consumer) emit(topic string, payload interface{}) error {
+	body, err := json.Marshal(payload)
+    if err != nil {
+        c.logger.Error("failed to marshal payload", zap.Error(err))
+        return err
+    }
+
+    var publishingError error
+    switch topic {
+		case "updateVideoStatus": {
+			publishingError = c.channel.Publish(
+    	        c.exchange, // exchange
+    	        topic,      // routing key
+    	        false,      // mandatory
+    	        false,      // immediate
+				amqp.Publishing{
+					ContentType: "application/json",
+					Body: body,
+				},
+			)
+			break
+		}
+		default:
+        // handle other topics if needed
+    }
+
+    if publishingError != nil {
+        c.logger.Error("failed to publish message", zap.Error(publishingError), zap.String("topic", topic))
+        return publishingError
+    }
+    c.logger.Info("message published", zap.String("exchange", c.exchange), zap.String("topic", topic))
+    return nil
 }

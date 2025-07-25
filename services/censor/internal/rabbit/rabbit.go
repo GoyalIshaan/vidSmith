@@ -27,7 +27,7 @@ type Consumer struct {
 func NewConsumer(
 	channel *amqp.Channel, 
 	logger *zap.Logger,
-	bucketName, srtKey string,
+	bucketName string,
 	s3Client *s3.S3,
 ) (*Consumer, error) {
 	queueName := "captionsRequest"
@@ -172,7 +172,7 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery) {
 			break // Success, exit retry loop
 		}
 		
-		c.logger.Error("failed to publish updateServer event", 
+		c.logger.Error("failed to publish updateVideoStatus event", 
 			zap.Error(emitErr), 
 			zap.Int("attempt", attempt),
 			zap.Int("maxRetries", maxRetries))
@@ -184,7 +184,7 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery) {
 	}
 	
 	if emitErr != nil {
-		c.logger.Error("failed to publish updateServer event after all retries", 
+		c.logger.Error("failed to publish updateVideoStatus event after all retries", 
 			zap.Error(emitErr), 
 			zap.String("videoId", req.VideoId))
 	}

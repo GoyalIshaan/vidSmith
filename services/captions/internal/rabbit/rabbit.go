@@ -196,7 +196,7 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery) {
 
 	updateVideoStatusEvent := types.UpdateVideoStatusEvent{
 		VideoId: req.VideoId,
-		Phase: "startCensor",
+		Phase: "captions",
 		SRTKey: srtKey,
 	}
 

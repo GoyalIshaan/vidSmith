@@ -42,7 +42,7 @@ func Process(
 	s3Client *s3.S3,
 	sess *session.Session,
 	logger *zap.Logger,
-) error {
+) (result string, err error) {
 	// Confirm that the Process function has been entered.
 	logger.Info("processor.Process function entered")
 	
@@ -57,7 +57,7 @@ func Process(
 	tempInputPath, _, err := downloadToTemp(ctx, s3Client, bucketName, originalKey, logger)
 	if err != nil {
 		logger.Error("failed to download original file from S3", zap.Error(err), zap.String("s3Key", originalKey))
-		return fmt.Errorf("failed to download original file: %w", err)
+		return "", fmt.Errorf("failed to download original file: %w", err)
 	}
 	// Ensure the temporary file is deleted after the function completes.
 	defer os.Remove(tempInputPath)
@@ -70,7 +70,7 @@ func Process(
 	// Transcode for each rendition using the downloaded local file.
 	for _, r := range renditions {
 		if err := transcodeOneRendition(ctx, uploader, bucketName, tempInputPath, keyFor(r), r, logger); err != nil {
-			return fmt.Errorf("rendition %s: %w", r.Name, err)
+			return "", fmt.Errorf("rendition %s: %w", r.Name, err)
 		}
 	}
 
@@ -79,7 +79,7 @@ func Process(
 	endpoint := fmt.Sprintf("https://%s.s3.%s.amazonaws.com", bucketName, aws.StringValue(s3Client.Config.Region))
 	manifest, err := buildManifest(endpoint, keyFor(renditions[0]), keyFor(renditions[1]), keyFor(renditions[2]))
 	if err != nil {
-		return fmt.Errorf("build manifest: %w", err)
+		return "", fmt.Errorf("build manifest: %w", err)
 	}
 
 	// Upload the manifest to S3.
@@ -89,10 +89,10 @@ func Process(
 		Body:        strings.NewReader(manifest),
 		ContentType: aws.String("application/vnd.apple.mpegurl"),
 	}); err != nil {
-		return fmt.Errorf("upload manifest: %w", err)
+		return "", fmt.Errorf("upload manifest: %w", err)
 	}
 	logger.Info("manifest uploaded", zap.String("key", manifestKey))
-	return nil
+	return manifestKey, nil
 }
 
 func transcodeOneRendition(
