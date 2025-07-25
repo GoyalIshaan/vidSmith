@@ -17,8 +17,9 @@ interface VideoUploadedMessage {
 
 let connection: any;
 let confirmChannel: amqp.ConfirmChannel;
+let initPromise: Promise<void> | null = null;
 
-async function rabbitInit() {
+async function rabbitInit(): Promise<void> {
   connection = await amqp.connect(RABBITMQ_URL);
   confirmChannel = await connection.createConfirmChannel();
   await confirmChannel.assertExchange(EXCHANGE_NAME, EXCHANGE_TYPE, {
@@ -29,10 +30,18 @@ async function rabbitInit() {
   );
 }
 
-rabbitInit().catch((err) => {
-  console.error("Error initializing RabbitMQ:", err);
-  process.exit(1);
-});
+function ensureInitialized(): Promise<void> {
+  if (!initPromise) {
+    initPromise = rabbitInit().catch((err) => {
+      console.error("Error initializing RabbitMQ:", err);
+      process.exit(1);
+    });
+  }
+  return initPromise;
+}
+
+// Start initialization immediately
+ensureInitialized();
 
 /**
  * Publish a newVideoUploaded event, waiting up to CONFIRM_TIMEOUT for an ACK.
@@ -41,6 +50,9 @@ rabbitInit().catch((err) => {
 export async function publishNewVideo(
   msg: VideoUploadedMessage
 ): Promise<void> {
+  // Wait for initialization to complete before proceeding
+  await ensureInitialized();
+
   if (!confirmChannel) {
     throw new Error("RabbitMQ confirm channel is not initialized");
   }
