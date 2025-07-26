@@ -1,5 +1,5 @@
 {
-  "id": "c88a1788-fa8f-4291-8664-9cedf245c7c2",
+  "id": "1ab66227-a02f-48a2-910d-0915e16fb244",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -21,32 +21,46 @@
           "primaryKey": false,
           "notNull": true
         },
-        "filename": {
-          "name": "filename",
+        "s3Key": {
+          "name": "s3Key",
           "type": "varchar(255)",
           "primaryKey": false,
           "notNull": true
         },
         "status": {
           "name": "status",
-          "type": "varchar(255)",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "default": "'UPLOADING'"
+          "default": 0
         },
-        "manifestUrl": {
-          "name": "manifestUrl",
-          "type": "varchar(2048)",
+        "bucketName": {
+          "name": "bucketName",
+          "type": "varchar(255)",
           "primaryKey": false,
           "notNull": false,
           "default": "''"
         },
-        "captionsUrl": {
-          "name": "captionsUrl",
-          "type": "varchar(2048)",
+        "captionsKey": {
+          "name": "captionsKey",
+          "type": "varchar(255)",
           "primaryKey": false,
           "notNull": false,
           "default": "''"
+        },
+        "manifestKey": {
+          "name": "manifestKey",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "''"
+        },
+        "censor": {
+          "name": "censor",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false,
+          "default": false
         },
         "createdAt": {
           "name": "createdAt",

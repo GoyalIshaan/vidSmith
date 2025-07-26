@@ -1,5 +1,5 @@
 import type { Resolvers } from "./types/graphql";
-import type { Video, VideoStatus } from "./types/graphql";
+import type { Video } from "./types/graphql";
 import { DB } from "./index";
 import { videosTable } from "./db/schema";
 import { eq } from "drizzle-orm";
@@ -13,7 +13,7 @@ export const resolvers: Resolvers = {
         return videos.map((video) => ({
           id: video.id,
           videoName: video.videoName, // Map videoName to filename
-          status: video.status as VideoStatus,
+          status: video.status,
           s3Key: video.s3Key,
           bucketName: video.bucketName,
           captionsKey: video.captionsKey,
@@ -37,7 +37,7 @@ export const resolvers: Resolvers = {
         return {
           id: video.id,
           videoName: video.videoName, // Map videoName to filename
-          status: video.status as VideoStatus,
+          status: video.status,
           s3Key: video.s3Key,
           bucketName: video.bucketName,
           captionsKey: video.captionsKey,
@@ -102,7 +102,7 @@ export const resolvers: Resolvers = {
         );
         return {
           ...result,
-          status: result.status as VideoStatus,
+          status: result.status,
         };
       } catch (error) {
         console.error("Error completing upload:", error);

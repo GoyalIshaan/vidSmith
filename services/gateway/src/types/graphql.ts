@@ -37,19 +37,12 @@ export type Video = {
   __typename?: "Video";
   id: Scalars["ID"];
   videoName: Scalars["String"];
-  status: VideoStatus;
+  status: Scalars["Int"];
   s3Key?: Maybe<Scalars["String"]>;
   bucketName?: Maybe<Scalars["String"]>;
   captionsKey?: Maybe<Scalars["String"]>;
   createdAt: Scalars["String"];
 };
-
-export enum VideoStatus {
-  UPLOADING = "UPLOADING",
-  TRANSCODING = "TRANSCODING",
-  READY = "READY",
-  ERROR = "ERROR",
-}
 
 /** Presigned URL for a single part in a multipart upload. */
 export type PresignedUrl = {
@@ -125,7 +118,7 @@ export type CompleteMultipartUploadResponse = {
   __typename?: "CompleteMultipartUploadResponse";
   videoDBID: Scalars["ID"];
   bucketName: Scalars["String"];
-  status: VideoStatus;
+  status: Scalars["Int"];
 };
 
 export type InitiateUploadResponse = {
@@ -248,9 +241,8 @@ export type ResolversTypes = {
   Video: ResolverTypeWrapper<Video>;
   ID: ResolverTypeWrapper<Scalars["ID"]>;
   String: ResolverTypeWrapper<Scalars["String"]>;
-  VideoStatus: VideoStatus;
-  PresignedUrl: ResolverTypeWrapper<PresignedUrl>;
   Int: ResolverTypeWrapper<Scalars["Int"]>;
+  PresignedUrl: ResolverTypeWrapper<PresignedUrl>;
   UploadInfo: ResolverTypeWrapper<UploadInfo>;
   PartInput: PartInput;
   Query: ResolverTypeWrapper<{}>;
@@ -266,8 +258,8 @@ export type ResolversParentTypes = {
   Video: Video;
   ID: Scalars["ID"];
   String: Scalars["String"];
-  PresignedUrl: PresignedUrl;
   Int: Scalars["Int"];
+  PresignedUrl: PresignedUrl;
   UploadInfo: UploadInfo;
   PartInput: PartInput;
   Query: {};
@@ -285,7 +277,7 @@ export type VideoResolvers<
 > = {
   id?: Resolver<ResolversTypes["ID"], ParentType, ContextType>;
   videoName?: Resolver<ResolversTypes["String"], ParentType, ContextType>;
-  status?: Resolver<ResolversTypes["VideoStatus"], ParentType, ContextType>;
+  status?: Resolver<ResolversTypes["Int"], ParentType, ContextType>;
   s3Key?: Resolver<Maybe<ResolversTypes["String"]>, ParentType, ContextType>;
   bucketName?: Resolver<
     Maybe<ResolversTypes["String"]>,
@@ -389,7 +381,7 @@ export type CompleteMultipartUploadResponseResolvers<
 > = {
   videoDBID?: Resolver<ResolversTypes["ID"], ParentType, ContextType>;
   bucketName?: Resolver<ResolversTypes["String"], ParentType, ContextType>;
-  status?: Resolver<ResolversTypes["VideoStatus"], ParentType, ContextType>;
+  status?: Resolver<ResolversTypes["Int"], ParentType, ContextType>;
   isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
 };
 
@@ -454,7 +446,7 @@ export interface Loaders<
   Video?: {
     id?: LoaderResolver<Scalars["ID"], Video, {}, TContext>;
     videoName?: LoaderResolver<Scalars["String"], Video, {}, TContext>;
-    status?: LoaderResolver<VideoStatus, Video, {}, TContext>;
+    status?: LoaderResolver<Scalars["Int"], Video, {}, TContext>;
     s3Key?: LoaderResolver<Maybe<Scalars["String"]>, Video, {}, TContext>;
     bucketName?: LoaderResolver<Maybe<Scalars["String"]>, Video, {}, TContext>;
     captionsKey?: LoaderResolver<Maybe<Scalars["String"]>, Video, {}, TContext>;
@@ -490,7 +482,7 @@ export interface Loaders<
       TContext
     >;
     status?: LoaderResolver<
-      VideoStatus,
+      Scalars["Int"],
       CompleteMultipartUploadResponse,
       {},
       TContext
