@@ -1,13 +1,12 @@
 import * as amqp from "amqplib";
+import {
+  RABBITMQ_URL,
+  EXCHANGE_NAME,
+  EXCHANGE_TYPE,
+  PUBLISHER_ROUTING_KEY,
+} from "./rabbitArc";
 
-const RABBITMQ_URL = process.env.RABBITMQ_URL || "amqp://localhost";
-const EXCHANGE_NAME = "newVideoUploaded";
-const EXCHANGE_TYPE: "fanout" | "topic" = "topic";
-const ROUTING_KEY = "videoUploaded";
-
-// How long to wait for an ACK before retrying (in ms)
 const CONFIRM_TIMEOUT = 1_000;
-// How many times to retry before bubbling up an error
 const MAX_RETRIES = 3;
 
 interface VideoUploadedMessage {
@@ -25,9 +24,7 @@ async function rabbitInit(): Promise<void> {
   await confirmChannel.assertExchange(EXCHANGE_NAME, EXCHANGE_TYPE, {
     durable: true,
   });
-  console.log(
-    `🐇 RabbitMQ: confirm‐channel ready & exchange asserted (${EXCHANGE_NAME})`
-  );
+  console.log("RabbitMQ publisher initialized");
 }
 
 function ensureInitialized(): Promise<void> {
@@ -43,10 +40,6 @@ function ensureInitialized(): Promise<void> {
 // Start initialization immediately
 ensureInitialized();
 
-/**
- * Publish a newVideoUploaded event, waiting up to CONFIRM_TIMEOUT for an ACK.
- * Retries up to MAX_RETRIES times on timeout or NACK.
- */
 export async function publishNewVideo(
   msg: VideoUploadedMessage
 ): Promise<void> {
@@ -60,7 +53,7 @@ export async function publishNewVideo(
   const payload = Buffer.from(JSON.stringify(msg));
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    confirmChannel.publish(EXCHANGE_NAME, ROUTING_KEY, payload, {
+    confirmChannel.publish(EXCHANGE_NAME, PUBLISHER_ROUTING_KEY, payload, {
       persistent: true,
     });
 

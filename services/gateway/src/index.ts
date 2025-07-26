@@ -10,7 +10,7 @@ import { UploadClient } from "./clients/uploadClient";
 import { MetadataClient } from "./clients/metadataClient";
 import { resolvers } from "./resolvers";
 import codegenMercurius from "mercurius-codegen";
-// Type declarations are automatically loaded by TypeScript
+import { startConsuming } from "./messaging/consumer";
 
 export const DB = drizzle(process.env.DATABASE_URL!);
 
@@ -55,6 +55,8 @@ app.register(mercurius as any, {
 codegenMercurius(app, {
   targetPath: path.join(__dirname, "types", "graphql.ts"),
 });
+
+startConsuming();
 
 async function start() {
   try {
