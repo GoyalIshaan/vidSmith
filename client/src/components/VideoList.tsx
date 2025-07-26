@@ -36,42 +36,60 @@ const VideoList: React.FC = () => {
   const getStatusBadgeClass = (status: number) => {
     const baseClasses =
       "px-3 py-1 rounded-full text-xs font-semibold text-white flex items-center gap-1";
-    if (status >= 6) {
-      return `${baseClasses} bg-green-500`;
-    } else if (status >= 3) {
-      return `${baseClasses} bg-blue-500`;
-    } else if (status >= 1) {
-      return `${baseClasses} bg-yellow-500`;
+    if (status === 6) {
+      return `${baseClasses} bg-green-500`; // Everything done
+    } else if (status === 5) {
+      return `${baseClasses} bg-purple-500`; // Captioning + Censoring done
+    } else if (status === 4) {
+      return `${baseClasses} bg-amber-500`; // Transcoding + Censoring (captioning failed/skipped)
+    } else if (status === 3) {
+      return `${baseClasses} bg-blue-500`; // Transcoding + Captioning done
+    } else if (status === 2) {
+      return `${baseClasses} bg-yellow-500`; // Captioning done
+    } else if (status === 1) {
+      return `${baseClasses} bg-orange-500`; // Transcoding done
     } else if (status === 0) {
-      return `${baseClasses} bg-orange-500`;
+      return `${baseClasses} bg-gray-500`; // Just uploaded
     } else {
-      return `${baseClasses} bg-red-500`;
+      return `${baseClasses} bg-red-500`; // Error or unknown status
     }
   };
 
   const getStatusIcon = (status: number) => {
-    if (status >= 6) {
-      return "✅";
-    } else if (status >= 3) {
-      return "🔍"; // Censoring
-    } else if (status >= 1) {
-      return "📝"; // Captioning
+    if (status === 6) {
+      return "✅"; // Everything done
+    } else if (status === 5) {
+      return "🔍"; // Captioning + Censoring done
+    } else if (status === 4) {
+      return "🔨"; // Transcoding + Censoring (captioning failed/skipped)
+    } else if (status === 3) {
+      return "📝"; // Transcoding + Captioning done
+    } else if (status === 2) {
+      return "📝"; // Captioning done
+    } else if (status === 1) {
+      return "🔄"; // Transcoding done
     } else if (status === 0) {
-      return "🔄"; // Transcoding
+      return "⏳"; // Just uploaded
     } else {
-      return "❌";
+      return "❌"; // Error or unknown status
     }
   };
 
   const getStatusText = (status: number) => {
-    if (status >= 6) {
+    if (status === 6) {
       return "READY";
-    } else if (status >= 3) {
+    } else if (status === 5) {
+      return "PROCESSING FINAL";
+    } else if (status === 4) {
+      return "PARTIAL PROCESSING";
+    } else if (status === 3) {
       return "CENSORING";
-    } else if (status >= 1) {
-      return "CAPTIONING";
+    } else if (status === 2) {
+      return "CAPTIONING DONE";
+    } else if (status === 1) {
+      return "TRANSCODING DONE";
     } else if (status === 0) {
-      return "TRANSCODING";
+      return "UPLOADED";
     } else {
       return "ERROR";
     }

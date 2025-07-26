@@ -247,57 +247,104 @@ const VideoUpload: React.FC = () => {
       )}
 
       {isUploading && (
-        <div className="w-full max-w-lg">
+        <div className="bg-white border border-black rounded-xl p-8 max-w-2xl mx-auto">
+          {/* Upload Header */}
           <div className="text-center mb-8">
-            <h3 className="text-black text-2xl font-semibold mb-4">
-              Uploading Video...
+            <div className="text-6xl mb-4 animate-pulse">🚀</div>
+            <h3 className="text-black text-3xl font-bold mb-2">
+              Uploading Your Video
             </h3>
-            {uploadProgress && (
-              <div className="flex justify-between text-sm mb-4">
-                <p className="text-black">
-                  Part {uploadProgress.currentPart} of{" "}
-                  {uploadProgress.totalParts}
-                </p>
-                <p className="text-black">
-                  {uploadProgress.uploadedParts} parts uploaded
-                </p>
-              </div>
-            )}
+            <p className="text-gray-600 text-lg">
+              {videoTitle || selectedFile?.name}
+            </p>
           </div>
 
+          {/* Upload Stats */}
           {uploadProgress && (
-            <div className="relative bg-white border border-black rounded-full h-5 overflow-hidden mb-6 shadow-inner">
-              <div
-                className="h-full bg-red-500 rounded-full transition-all duration-300 relative overflow-hidden"
-                style={{ width: `${uploadProgress.percentage}%` }}
-              >
-                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent animate-pulse"></div>
+            <div className="bg-gray-50 rounded-lg p-4 mb-6">
+              <div className="grid grid-cols-2 gap-4 text-center">
+                <div>
+                  <p className="text-2xl font-bold text-black">
+                    {uploadProgress.currentPart || 1}
+                  </p>
+                  <p className="text-sm text-gray-600">Current Part</p>
+                </div>
+                <div>
+                  <p className="text-2xl font-bold text-black">
+                    {uploadProgress.totalParts || 1}
+                  </p>
+                  <p className="text-sm text-gray-600">Total Parts</p>
+                </div>
               </div>
-              <span className="absolute inset-0 flex items-center justify-center text-black text-sm font-semibold">
-                {uploadProgress.percentage}%
-              </span>
             </div>
           )}
 
-          <button
-            className="w-full bg-red-500 hover:bg-black text-white py-3 px-6 rounded-lg text-lg font-semibold transition-all duration-300 transform hover:-translate-y-0.5 shadow-lg"
-            onClick={handleAbort}
-            type="button"
-          >
-            Cancel Upload
-          </button>
+          {/* Progress Bar */}
+          {uploadProgress && (
+            <div className="mb-8">
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-black font-semibold">Progress</span>
+                <span className="text-black font-bold text-lg">
+                  {uploadProgress.percentage}%
+                </span>
+              </div>
+              <div className="relative bg-gray-200 border border-black rounded-full h-6 overflow-hidden shadow-inner">
+                <div
+                  className="h-full bg-gradient-to-r from-red-500 to-red-600 rounded-full transition-all duration-500 ease-out relative overflow-hidden"
+                  style={{ width: `${uploadProgress.percentage}%` }}
+                >
+                  <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent animate-pulse"></div>
+                </div>
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <span className="text-black text-sm font-bold drop-shadow-sm">
+                    {uploadProgress.percentage}%
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Status Message */}
+          {uploadStatus && (
+            <div className="text-center mb-6 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <p className="text-blue-700 font-medium">{uploadStatus}</p>
+            </div>
+          )}
+
+          {/* Cancel Button */}
+          <div className="text-center">
+            <button
+              className="bg-red-500 hover:bg-black text-white py-3 px-8 rounded-lg text-lg font-semibold transition-all duration-300 transform hover:-translate-y-0.5 hover:shadow-xl border-2 border-transparent hover:border-red-500"
+              onClick={handleAbort}
+              type="button"
+            >
+              ❌ Cancel Upload
+            </button>
+          </div>
         </div>
       )}
 
-      {uploadStatus && (
-        <div className="mt-6 p-4 bg-green-100 border border-green-500 rounded-lg text-center">
-          <p className="text-green-700 font-medium">{uploadStatus}</p>
+      {uploadStatus && !isUploading && (
+        <div className="mt-8 max-w-2xl mx-auto">
+          <div className="p-6 bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-500 rounded-xl text-center shadow-lg">
+            <div className="text-4xl mb-3">✅</div>
+            <h3 className="text-green-800 text-xl font-bold mb-2">
+              Upload Complete!
+            </h3>
+            <p className="text-green-700 font-medium">{uploadStatus}</p>
+          </div>
         </div>
       )}
 
       {error && (
-        <div className="mt-6 p-4 bg-white border border-red-500 rounded-lg text-center">
-          <p className="text-red-500 font-medium">❌ {error}</p>
+        <div className="mt-8 max-w-2xl mx-auto">
+          <div className="p-6 bg-gradient-to-r from-red-50 to-pink-50 border-2 border-red-500 rounded-xl text-center shadow-lg">
+            <div className="text-4xl mb-3">❌</div>
+            <h3 className="text-red-800 text-xl font-bold mb-2">
+              Upload Failed
+            </h3>
+            <p className="text-red-700 font-medium">{error}</p>
+          </div>
         </div>
       )}
     </div>

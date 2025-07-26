@@ -13,19 +13,15 @@ const VideoPipeline: React.FC<VideoPipelineProps> = ({ status, videoName }) => {
       case "transcoding":
         return status >= 1 ? "completed" : status === 0 ? "active" : "pending";
       case "captioning":
-        return status >= 3
-          ? "completed"
-          : status >= 1 && status < 3
-          ? "active"
-          : "pending";
+        return status >= 2 ? "completed" : status === 1 ? "active" : "pending";
       case "censoring":
-        return status >= 6
+        return status >= 5
           ? "completed"
-          : status >= 3 && status < 6
+          : status === 4 || status === 3 || status === 2
           ? "active"
           : "pending";
       case "done":
-        return status >= 6 ? "completed" : "pending";
+        return status === 6 ? "completed" : "pending";
       default:
         return "pending";
     }
@@ -128,15 +124,19 @@ const VideoPipeline: React.FC<VideoPipelineProps> = ({ status, videoName }) => {
       <div className="mt-4 text-center">
         <div className="text-sm text-gray-600">
           Status: {status} | Current Phase:{" "}
-          {status >= 6
+          {status === 6
             ? "Complete"
-            : status >= 3
+            : status === 5
+            ? "Processing Final"
+            : status === 3
             ? "Censoring"
-            : status >= 1
-            ? "Captioning"
-            : status >= 0
-            ? "Transcoding"
-            : "Waiting"}
+            : status === 2
+            ? "Captioning Done"
+            : status === 1
+            ? "Transcoding Done"
+            : status === 0
+            ? "Uploaded"
+            : "Error"}
         </div>
       </div>
     </div>

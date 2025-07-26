@@ -6,7 +6,7 @@ import type { Video } from "../types/graphql";
 import VideoPipeline from "./VideoPipeline";
 
 const GET_VIDEO = gql`
-  query GetVideo($id: String!) {
+  query GetVideo($id: ID!) {
     video(id: $id) {
       id
       videoName
@@ -36,14 +36,18 @@ const VideoDetails: React.FC = () => {
   }, [data]);
 
   const getStatusText = (status: number) => {
-    if (status >= 6) {
+    if (status === 6) {
       return "READY";
-    } else if (status >= 3) {
+    } else if (status === 5) {
+      return "PROCESSING FINAL";
+    } else if (status === 3) {
       return "CENSORING";
-    } else if (status >= 1) {
-      return "CAPTIONING";
+    } else if (status === 2) {
+      return "CAPTIONING DONE";
+    } else if (status === 1) {
+      return "TRANSCODING DONE";
     } else if (status === 0) {
-      return "TRANSCODING";
+      return "UPLOADED";
     } else {
       return "ERROR";
     }
@@ -52,30 +56,38 @@ const VideoDetails: React.FC = () => {
   const getStatusBadgeClass = (status: number) => {
     const baseClasses =
       "px-4 py-2 rounded-full text-sm font-semibold text-white flex items-center gap-2";
-    if (status >= 6) {
-      return `${baseClasses} bg-green-500`;
-    } else if (status >= 3) {
-      return `${baseClasses} bg-blue-500`;
-    } else if (status >= 1) {
-      return `${baseClasses} bg-yellow-500`;
+    if (status === 6) {
+      return `${baseClasses} bg-green-500`; // Everything done
+    } else if (status === 5) {
+      return `${baseClasses} bg-purple-500`; // Captioning + Censoring done
+    } else if (status === 3) {
+      return `${baseClasses} bg-blue-500`; // Transcoding + Captioning done
+    } else if (status === 2) {
+      return `${baseClasses} bg-yellow-500`; // Captioning done
+    } else if (status === 1) {
+      return `${baseClasses} bg-orange-500`; // Transcoding done
     } else if (status === 0) {
-      return `${baseClasses} bg-orange-500`;
+      return `${baseClasses} bg-gray-500`; // Just uploaded
     } else {
-      return `${baseClasses} bg-red-500`;
+      return `${baseClasses} bg-red-500`; // Error
     }
   };
 
   const getStatusIcon = (status: number) => {
-    if (status >= 6) {
-      return "✅";
-    } else if (status >= 3) {
-      return "🔍";
-    } else if (status >= 1) {
-      return "📝";
+    if (status === 6) {
+      return "✅"; // Everything done
+    } else if (status === 5) {
+      return "🔍"; // Captioning + Censoring done
+    } else if (status === 3) {
+      return "📝"; // Transcoding + Captioning done
+    } else if (status === 2) {
+      return "📝"; // Captioning done
+    } else if (status === 1) {
+      return "🔄"; // Transcoding done
     } else if (status === 0) {
-      return "🔄";
+      return "⏳"; // Just uploaded
     } else {
-      return "❌";
+      return "❌"; // Error
     }
   };
 
@@ -206,7 +218,7 @@ const VideoDetails: React.FC = () => {
         </div>
 
         {/* Play Button */}
-        {video.status >= 6 && video.s3Key && (
+        {video.status === 6 && video.s3Key && (
           <div className="mt-6 pt-6 border-t border-black">
             <button className="w-full bg-red-500 hover:bg-black text-white py-3 px-6 rounded-lg text-lg font-semibold transition-all duration-300 transform hover:-translate-y-0.5 shadow-lg flex items-center justify-center gap-3">
               ▶️ Play Video
