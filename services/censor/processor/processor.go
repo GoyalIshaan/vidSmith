@@ -28,6 +28,7 @@ func Process(
 	bucketName string,
 	srtKey string,
 	s3Client *s3.S3,
+	googleAPIKey string,
 	logger *zap.Logger,
 ) (bool, error) {
 	// Download SRT from S3
@@ -67,11 +68,16 @@ func Process(
 		chunkStr := string(chunk)
 
 		prompt := gemini.BuildPrompt(chunkStr, censoredWords)
-		answer := gemini.AskGemini(ctx, prompt, logger)
+		answer := gemini.AskGemini(ctx, prompt, googleAPIKey, logger)
 
 		if answer.Error != nil {
 			logger.Warn("Gemini check failed", zap.Error(answer.Error))
-			continue // or return false, err if you want to fail hard
+			// Continue with next chunk instead of failing the entire process
+			// This allows the service to be more resilient to API failures
+			if len(chunk) < chunkSize {
+				break // last chunk
+			}
+			continue
 		}
 
 		if answer.Result {

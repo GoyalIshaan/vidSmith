@@ -40,7 +40,7 @@ func main() {
 
 	
 
-	rabbitConsumer, err := rabbit.NewConsumer(rabbitChannel, logger, config.BucketName, s3Client)
+	rabbitConsumer, err := rabbit.NewConsumer(rabbitChannel, logger, config.BucketName, s3Client, config.GoogleAPIKey)
 	if err != nil {
 		panic("failed to create RabbitMQ consumer: " + err.Error())
 	}

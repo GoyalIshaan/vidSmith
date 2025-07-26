@@ -12,6 +12,7 @@ type Config struct {
 	BucketName string
 	AWSRegion   string
 	DatabaseURL string
+	GoogleAPIKey string
 }
 
 func LoadConfig() (*Config, error) {
@@ -25,6 +26,7 @@ func LoadConfig() (*Config, error) {
 		"BUCKET_NAME",
 		"AWS_REGION",
 		"DATABASE_URL",
+		"GEMINI_API_KEY",
 	}
 
 	for _, key := range required {
@@ -38,6 +40,7 @@ func LoadConfig() (*Config, error) {
 		BucketName:   viper.GetString("BUCKET_NAME"),
 		AWSRegion:    viper.GetString("AWS_REGION"),
 		DatabaseURL: viper.GetString("DATABASE_URL"),
+		GoogleAPIKey: viper.GetString("GEMINI_API_KEY"),
 	}
 	return cfg, nil
 }

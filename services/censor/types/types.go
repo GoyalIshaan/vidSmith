@@ -1,9 +1,9 @@
 package types
 
 type CensorRequest struct {
-	VideoId    string `json:"videoId"`
-	S3Key      string `json:"s3Key"`
-	SRTKey      string `json:"srtKey"`
+	VideoId    string `json:"VideoId"`
+	S3Key      string `json:"S3Key"`
+	SRTKey      string `json:"SRTKey"`
 }
 
 type GeminiReturns struct {
@@ -12,7 +12,7 @@ type GeminiReturns struct {
 }
 
 type UpdateVideoStatusEvent struct {
-	VideoId string `json:"videoId"`
-	Phase string `json:"phase"`
-	Censor bool `json:"censor"`
+	VideoId string `json:"VideoId"`
+	Phase string `json:"Phase"`
+	Censor bool `json:"Censor"`
 }

@@ -53,7 +53,7 @@ func main() {
 		cancel()
 	}()
 	
-	logger.Info("transcoder service started, waiting for messages...")
+	logger.Info("captions service started, waiting for messages...")
 	err = rabbitConsumer.Consume(ctx)
 	if err != nil {
 		logger.Error("consumer error", zap.Error(err))

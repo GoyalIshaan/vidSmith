@@ -23,15 +23,27 @@ export default async function censorMessageHandler(
 }
 
 export async function captionsMessageHandler(message: captionsUpdateMessage) {
+  console.log("Processing captions message:", JSON.stringify(message, null, 2));
+
+  const updateData: any = {
+    status: sql`${videosTable.status} + 2`,
+    updatedAt: new Date(),
+  };
+
+  // Only set captionsKey if SRTKey is provided and not empty
+  if (message.SRTKey && message.SRTKey.trim() !== "") {
+    updateData.captionsKey = message.SRTKey;
+    console.log("Setting captions key:", message.SRTKey);
+  } else {
+    console.log("Captions failed - no SRT key provided");
+  }
+
   const result = await DB.update(videosTable)
-    .set({
-      captionsKey: message.SRTKey,
-      status: sql`${videosTable.status} + 2`,
-      updatedAt: new Date(),
-    })
+    .set(updateData)
     .where(eq(videosTable.id, message.VideoId))
     .returning();
 
+  console.log("Captions handler result:", result[0]);
   return result[0];
 }
 

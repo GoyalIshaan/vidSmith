@@ -44,51 +44,105 @@ func Process(
 	transcriber := transcribe.NewFromConfig(cfg);
 	
 	jobName := fmt.Sprintf("caption-%s-%d", request.VideoId, time.Now().Unix())
-    inputURI := fmt.Sprintf("s3://%s/%s", bucketName, request.S3Key)
+    inputURI := fmt.Sprintf("s3://%s/originals/%s", bucketName, request.S3Key)
     jsonKey := fmt.Sprintf("%s/%s.json", transcriberJobPrefix, jobName)
     srtKey := fmt.Sprintf("%s/%s.srt", captionsPrefix, request.VideoId)
 
+    // Validate input file exists and has reasonable size
+    headObj, err := s3Client.HeadObjectWithContext(context, &s3.HeadObjectInput{
+        Bucket: aws.String(bucketName),
+        Key:    aws.String(fmt.Sprintf("originals/%s", request.S3Key)),
+    })
+    if err != nil {
+        return fmt.Errorf("input video file not found: %w", err)
+    }
+
+    fileSize := *headObj.ContentLength
+    if fileSize < 1024 { // Less than 1KB
+        logger.Error("input video file too small", 
+            zap.String("s3Key", request.S3Key),
+            zap.Int64("fileSizeBytes", fileSize))
+        return fmt.Errorf("input video file too small (%d bytes) - may be corrupted", fileSize)
+    }
+
+    logger.Info("starting transcription", 
+        zap.String("jobName", jobName),
+        zap.String("inputURI", inputURI),
+        zap.Int64("fileSizeBytes", fileSize))
+
 	if _, err = transcriber.StartTranscriptionJob(context, &transcribe.StartTranscriptionJobInput{
 		TranscriptionJobName: &jobName,
-		LanguageCode: "en-US",
+		LanguageCode: transcribeTypes.LanguageCodeEnUs,
         Media: &transcribeTypes.Media{
             MediaFileUri: aws.String(inputURI),
         },
         OutputBucketName: aws.String(bucketName),
         OutputKey:        aws.String(jsonKey),
+        Settings: &transcribeTypes.Settings{
+            ShowSpeakerLabels: aws.Bool(false), // Disable speaker labels for faster processing
+            ShowAlternatives: aws.Bool(false),  // Disable alternatives for cleaner output
+            // MaxSpeakerLabels removed - not needed when ShowSpeakerLabels is false
+        },
 	}); err != nil {
 		return fmt.Errorf("start transcription job: %w", err)
 	}
 
-	logger.Info("Transcription Job Started")
+	logger.Info("AWS Transcription Job Started Successfully", 
+        zap.String("jobName", jobName),
+        zap.String("inputURI", inputURI))
 
     // poll the job for completion
     timeout := 0
+    maxTimeout := 1800 // 30 minutes instead of 1 hour for faster feedback
 	for {
-        if (timeout == 3600) {
-            return fmt.Errorf("transcription job ran for over an hour")
+        if (timeout >= maxTimeout) {
+            logger.Error("transcription job timeout", 
+                zap.String("jobName", jobName),
+                zap.Int("timeoutSeconds", timeout))
+            return fmt.Errorf("transcription job ran for over %d seconds", maxTimeout)
         }
         
         select {
-            case <-context.Done(): return context.Err()
+            case <-context.Done(): 
+                logger.Info("transcription job cancelled due to context", zap.String("jobName", jobName))
+                return context.Err()
             case <-time.After(5 * time.Second): {
                 timeout += 5
                 out, err := transcriber.GetTranscriptionJob(context, &transcribe.GetTranscriptionJobInput{
                     TranscriptionJobName: aws.String(jobName),
                 })
                 if err != nil {
+                    logger.Error("failed to get transcription job status", 
+                        zap.Error(err), 
+                        zap.String("jobName", jobName))
                     return fmt.Errorf("get transcription job: %w", err)
                 }
                 status := string(out.TranscriptionJob.TranscriptionJobStatus)
+                logger.Debug("transcription job status", 
+                    zap.String("status", status), 
+                    zap.String("jobName", jobName),
+                    zap.Int("timeoutSeconds", timeout))
+                
                 switch status {
                     case "COMPLETED": {
-                        logger.Info("transcription completed", zap.String("jobName", jobName))
+                        logger.Info("transcription completed", 
+                            zap.String("jobName", jobName),
+                            zap.Int("durationSeconds", timeout))
                         goto DOWNLOAD
                     }
                     case "FAILED": {
-                        return fmt.Errorf("transcription failed: %s", aws.StringValue(out.TranscriptionJob.FailureReason))
+                        failureReason := aws.StringValue(out.TranscriptionJob.FailureReason)
+                        logger.Error("transcription job failed", 
+                            zap.String("jobName", jobName),
+                            zap.String("failureReason", failureReason))
+                        return fmt.Errorf("transcription failed: %s", failureReason)
                     }
+                    case "IN_PROGRESS":
+                        // Continue polling
                     default:
+                        logger.Warn("unknown transcription status", 
+                            zap.String("status", status),
+                            zap.String("jobName", jobName))
                 }
             }
         }
@@ -116,11 +170,52 @@ func Process(
         return fmt.Errorf("decode transcript JSON: %w", err)
     }
 
+    // Validate transcription results
+    if len(data.Results.Items) == 0 {
+        logger.Error("transcription completed but no transcript items found", 
+            zap.String("jobName", jobName))
+        return fmt.Errorf("transcription produced no content - video may have no speech or be too short")
+    }
+
+    // Count meaningful words (excluding punctuation)
+    wordCount := 0
+    for _, item := range data.Results.Items {
+        if item.Type == "pronunciation" && len(item.Alternatives) > 0 {
+            wordCount++
+        }
+    }
+
+    if wordCount < 3 { // Require at least 3 words for meaningful content
+        logger.Error("transcription completed but insufficient content", 
+            zap.String("jobName", jobName),
+            zap.Int("wordCount", wordCount))
+        return fmt.Errorf("transcription produced insufficient content (%d words) - video may be too short or have no clear speech", wordCount)
+    }
+
+    logger.Info("transcription validation passed", 
+        zap.String("jobName", jobName),
+        zap.Int("itemCount", len(data.Results.Items)),
+        zap.Int("wordCount", wordCount))
+
     // 5) Convert to SRT
     srt, err := toSRT(data.Results.Items)
     if err != nil {
         return fmt.Errorf("convert to SRT: %w", err)
     }
+
+    // Validate SRT content
+    srtLength := len(srt)
+    if srtLength < 50 { // SRT should have at least 50 characters for meaningful content
+        logger.Error("generated SRT content too short", 
+            zap.String("jobName", jobName),
+            zap.Int("srtLength", srtLength),
+            zap.String("srtPreview", string(srt)))
+        return fmt.Errorf("generated SRT content too short (%d bytes) - insufficient transcription", srtLength)
+    }
+
+    logger.Info("SRT generation successful", 
+        zap.String("jobName", jobName),
+        zap.Int("srtLength", srtLength))
 
     // 6) Upload the .srt back to S3
     _, err = s3Client.PutObjectWithContext(context, &s3.PutObjectInput{

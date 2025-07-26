@@ -22,6 +22,7 @@ type Consumer struct {
 	logger  *zap.Logger
 	bucketName string
 	s3Client *s3.S3
+	googleAPIKey string
 }
 
 func NewConsumer(
@@ -29,11 +30,12 @@ func NewConsumer(
 	logger *zap.Logger,
 	bucketName string,
 	s3Client *s3.S3,
+	googleAPIKey string,
 ) (*Consumer, error) {
-	queueName := "captionsRequest"
+	queueName := "censorRequest"
 	exchangeName := "newVideoUploaded"
 	exchangeType := "topic"
-	routingKey := "videoUploaded"
+	routingKey := "startCensor"
 
 	// Declare the exchange (same as gateway)
 	if err := channel.ExchangeDeclare(
@@ -83,6 +85,7 @@ func NewConsumer(
 		logger: logger,
 		bucketName: bucketName,		
 		s3Client: s3Client,
+		googleAPIKey: googleAPIKey,
 		}, nil
 }
 
@@ -143,13 +146,20 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery) {
 		return
 	}
 
-	c.logger.Info("received transcode request", zap.String("videoId", req.VideoId), zap.String("s3Key", req.S3Key))
+	c.logger.Info("received censor request", zap.String("videoId", req.VideoId), zap.String("s3Key", req.S3Key), zap.String("srtKey", req.SRTKey))
+
+	// Validate that we have a valid SRT key (captions must be completed first)
+	if req.SRTKey == "" {
+		c.logger.Error("censor request received without SRT key - captions not completed", zap.String("videoId", req.VideoId))
+		d.Nack(false, false) // discard invalid message
+		return
+	}
 
 	// Use the existing s3Client's session instead of creating a new one
-	// invoking the transcoding services
-	result, err := processor.Process(ctx,  c.bucketName, req.SRTKey, c.s3Client, c.logger)
+	// invoking the censoring services
+	result, err := processor.Process(ctx,  c.bucketName, req.SRTKey, c.s3Client, c.googleAPIKey, c.logger)
 	if err !=nil {
-		c.logger.Error("transcoding failed", zap.Error(err))
+		c.logger.Error("censoring failed", zap.Error(err))
 		d.Nack(false, true) // requeue for retry
 		return
 	}
@@ -189,7 +199,7 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery) {
 			zap.String("videoId", req.VideoId))
 	}
 
-	c.logger.Info("transcode request completed", zap.String("videoId", req.VideoId))
+	c.logger.Info("censor request completed", zap.String("videoId", req.VideoId))
 }
 
 func (c *Consumer) emit(topic string, payload interface{}) error {
@@ -201,7 +211,7 @@ func (c *Consumer) emit(topic string, payload interface{}) error {
 
     var publishingError error
     switch topic {
-		case "updateServer": {
+		case "updateVideoStatus": {
 			publishingError = c.channel.Publish(
     	        c.exchange, // exchange
     	        topic,      // routing key
