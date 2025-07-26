@@ -81,14 +81,17 @@ export class UploadService {
   private uploadedParts: PartInput[] = [];
   private totalParts: number = 0;
 
-  async initiateUpload(file: File): Promise<InitiateUploadResponse> {
+  async initiateUpload(
+    file: File,
+    customVideoName?: string
+  ): Promise<InitiateUploadResponse> {
     const totalParts = Math.ceil(file.size / CHUNK_SIZE);
     this.totalParts = totalParts;
 
     const response = await client.mutate({
       mutation: INITIATE_UPLOAD,
       variables: {
-        videoName: file.name.split(".")[0], // Remove extension for video name
+        videoName: customVideoName || file.name.split(".")[0], // Use custom name or file name without extension
         fileName: file.name,
         contentType: file.type,
         size: file.size,

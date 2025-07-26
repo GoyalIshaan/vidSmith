@@ -6,7 +6,7 @@ type TranscodeRequest struct {
 }
 
 type UpdateVideoStatusEvent struct {
-	VideoId string `json:"videoId"`
-	Phase string `json:"phase"`
-	ManifestKey string `json:"manifestKey"`
+	VideoId string `json:"VideoId"`
+	Phase string `json:"Phase"`
+	ManifestKey string `json:"ManifestKey"`
 }

@@ -1,7 +1,7 @@
 export interface Video {
   id: string;
   videoName: string;
-  status: VideoStatus;
+  status: number;
   s3Key?: string;
   bucketName?: string;
   captionsKey?: string;

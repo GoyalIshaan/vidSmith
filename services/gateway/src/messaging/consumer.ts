@@ -75,7 +75,10 @@ export async function startConsuming(): Promise<void> {
         const content = msg.content.toString();
         const messageData = JSON.parse(content);
 
-        console.log("Server Update Received");
+        console.log(
+          "Server Update Received:",
+          JSON.stringify(messageData, null, 2)
+        );
 
         await processMessage(messageData);
 
@@ -95,16 +98,22 @@ export async function startConsuming(): Promise<void> {
 }
 
 async function processMessage(messageData: any): Promise<void> {
-  const phase = messageData.phase;
+  const phase = messageData.Phase;
+  console.log(`Processing message with phase: ${phase}`);
+
   if (phase == "censor") {
+    console.log("Handling censor message");
     const censorMessage: censorUpdateMessage = messageData;
     await censorMessageHandler(censorMessage);
   } else if (phase == "captions") {
+    console.log("Handling captions message");
     const captionsMessage: captionsUpdateMessage = messageData;
     await captionsMessageHandler(captionsMessage);
   } else if (phase == "transcode") {
+    console.log("Handling transcode message");
     const transcoderMessage: transcoderUpdateMessage = messageData;
-    await transcoderMessageHandler(transcoderMessage);
+    const result = await transcoderMessageHandler(transcoderMessage);
+    console.log("Transcode handler result:", result);
   } else {
     console.warn(`⚠️ Unknown message type received:`, messageData);
   }

@@ -5,7 +5,7 @@ import type {
 } from "../types/rabbit";
 import { DB } from "../index";
 import { videosTable } from "../db/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 export default async function censorMessageHandler(
   message: censorUpdateMessage
@@ -13,6 +13,7 @@ export default async function censorMessageHandler(
   const result = await DB.update(videosTable)
     .set({
       censor: message.Censor,
+      status: sql`${videosTable.status} + 3`,
       updatedAt: new Date(),
     })
     .where(eq(videosTable.id, message.VideoId))
@@ -25,6 +26,7 @@ export async function captionsMessageHandler(message: captionsUpdateMessage) {
   const result = await DB.update(videosTable)
     .set({
       captionsKey: message.SRTKey,
+      status: sql`${videosTable.status} + 2`,
       updatedAt: new Date(),
     })
     .where(eq(videosTable.id, message.VideoId))
@@ -39,6 +41,7 @@ export async function transcoderMessageHandler(
   const result = await DB.update(videosTable)
     .set({
       manifestKey: message.ManifestKey,
+      status: sql`${videosTable.status} + 1`,
       updatedAt: new Date(),
     })
     .where(eq(videosTable.id, message.VideoId))
