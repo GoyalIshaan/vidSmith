@@ -31,7 +31,7 @@ func NewConsumer(
 	logger *zap.Logger,
 	bucketName, captionsPrefix, transcriberJobPrefix string,
 	s3Client *s3.S3,
-	) (*Consumer, error) {
+) (*Consumer, error) {
 	queueName := "captionsRequest"
 	exchangeName := "newVideoUploaded"
 	exchangeType := "topic"
@@ -128,8 +128,7 @@ func (c *Consumer) Consume(ctx context.Context) error {
 	}
 }
 
-func (c *Consumer) handle(ctx context.Context, d amqp.Delivery) {
-	// TODO: Implement message handling logic
+func (c *Consumer) handle(ctx context.Context, d amqp.Delivery) {	
 	defer func() {
 		// Recover from panic and nack the message
 		if r := recover(); r != nil {
@@ -137,9 +136,7 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery) {
 			d.Nack(false, true)
 		}
 	}()
-
-	// TODO: Change this
-	// Unmarshal the message body into a TranscodeRequest struct
+	
 	var req types.CaptionsRequest
 	if err := json.Unmarshal(d.Body, &req); err != nil {
 		c.logger.Error("invalid message", zap.Error(err), zap.ByteString("body", d.Body))
@@ -150,71 +147,57 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery) {
 	c.logger.Info("received captions request", zap.String("videoId", req.VideoId), zap.String("s3Key", req.S3Key))
 
 	srtKey := fmt.Sprintf("%s/%s.srt", c.captionsPrefix, req.VideoId)
-	captionsSuccessful := true
 
-	// Use the existing s3Client's session instead of creating a new one
-	// invoking the transcoding service
+
 	if err := processor.Process(ctx, req, c.bucketName, c.captionsPrefix, c.transcriberJobPrefix, c.s3Client, c.logger); err != nil {
 		c.logger.Error("captions processing failed", zap.Error(err), zap.String("videoId", req.VideoId))
-		captionsSuccessful = false
-		// Don't requeue - acknowledge and continue with partial completion
-		// This prevents the captions service from blocking the entire pipeline
+		
+		d.Nack(false, true)
+		return
 	}
 
-	// Always acknowledge the message to prevent infinite retries
 	d.Ack(false)
 
-	// If captions were successful, publish the censor event
-	if captionsSuccessful {
-		startCensorEvent := types.CaptionsReadyEvent{
-			VideoId: req.VideoId,
-			SRTKey: srtKey,
-			S3Key: req.S3Key,
-		}
-
-		// Retry the startCensor event emission up to 3 times
-		maxRetries := 3
-		var emitErr error
-		for attempt := 1; attempt <= maxRetries; attempt++ {
-			emitErr = c.emit("startCensor", startCensorEvent)
-			if emitErr == nil {
-				break // Success, exit retry loop
-			}
-			
-			c.logger.Error("failed to publish startCensor event", 
-				zap.Error(emitErr), 
-				zap.Int("attempt", attempt),
-				zap.Int("maxRetries", maxRetries))
-			
-			if attempt < maxRetries {
-				// Wait before retry (exponential backoff)
-				time.Sleep(time.Duration(attempt) * time.Second)
-			}
-		}
-		
-		if emitErr != nil {
-			c.logger.Error("failed to publish startCensor event after all retries", 
-				zap.Error(emitErr), 
-				zap.String("videoId", req.VideoId))
-		}
-	} else {
-		c.logger.Warn("skipping censor step due to captions failure", zap.String("videoId", req.VideoId))
+	startCensorEvent := types.CaptionsReadyEvent{
+		VideoId: req.VideoId,
+		SRTKey: srtKey,
+		S3Key: req.S3Key,
 	}
 
-	// Always send status update regardless of captions success/failure
+	maxRetries := 3
+	var emitErr error
+	
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		emitErr = c.emit("startCensor", startCensorEvent)
+		if emitErr == nil {
+			break // Success, exit retry loop
+		}
+		
+		c.logger.Error("failed to publish startCensor event", 
+			zap.Error(emitErr), 
+			zap.Int("attempt", attempt),
+			zap.Int("maxRetries", maxRetries))
+		
+		if attempt < maxRetries {
+			// Wait before retry (exponential backoff)
+			time.Sleep(time.Duration(attempt) * time.Second)
+		}
+	}
+	
+	if emitErr != nil {
+		c.logger.Error("failed to publish startCensor event after all retries", 
+			zap.Error(emitErr), 
+			zap.String("videoId", req.VideoId))
+	}
+
+
 	updateVideoStatusEvent := types.UpdateVideoStatusEvent{
 		VideoId: req.VideoId,
 		Phase: "captions",
 		SRTKey: srtKey, // Set even if failed, so UI can show partial state
 	}
 
-	// Only set SRTKey if captions were actually successful
-	if !captionsSuccessful {
-		updateVideoStatusEvent.SRTKey = "" // Clear SRT key if captions failed
-	}
-
-	maxRetries := 3
-	emitErr := error(nil)
+	emitErr = nil
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		emitErr = c.emit("updateVideoStatus", updateVideoStatusEvent)
 		if emitErr == nil {
@@ -238,11 +221,6 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery) {
 			zap.String("videoId", req.VideoId))
 	}
 
-	if captionsSuccessful {
-		c.logger.Info("captions request completed successfully", zap.String("videoId", req.VideoId))
-	} else {
-		c.logger.Info("captions request completed with errors", zap.String("videoId", req.VideoId))
-	}
 }
 
 func (c *Consumer) emit(topic string, payload interface{}) error {

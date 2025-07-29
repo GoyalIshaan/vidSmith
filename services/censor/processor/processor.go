@@ -68,7 +68,9 @@ func Process(
 		chunkStr := string(chunk)
 
 		prompt := gemini.BuildPrompt(chunkStr, censoredWords)
+		logger.Info("prompt", zap.String("prompt", prompt))
 		answer := gemini.AskGemini(ctx, prompt, googleAPIKey, logger)
+		logger.Info("answer", zap.Any("answer", answer))
 
 		if answer.Error != nil {
 			logger.Warn("Gemini check failed", zap.Error(answer.Error))

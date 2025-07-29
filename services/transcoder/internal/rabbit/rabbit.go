@@ -112,7 +112,6 @@ func (c *Consumer) Consume(ctx context.Context, bucketName string, transcodedPre
 }
 
 func (c *Consumer) handle(ctx context.Context, d amqp.Delivery, bucketName string, transcodedPrefix string, manifestPrefix string, s3Client *s3.S3, awsSession *session.Session) {
-	// TODO: Implement message handling logic
 	defer func() {
 		// Recover from panic and nack the message
 		if r := recover(); r != nil {
@@ -121,11 +120,10 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery, bucketName strin
 		}
 	}()
 
-	// Unmarshal the message body into a TranscodeRequest struct
 	var req types.TranscodeRequest
 	if err := json.Unmarshal(d.Body, &req); err != nil {
 		c.logger.Error("invalid message", zap.Error(err), zap.ByteString("body", d.Body))
-		d.Nack(false, false) // discard bad message
+		d.Nack(false, false) // discard if bad message
 		return
 	}
 
