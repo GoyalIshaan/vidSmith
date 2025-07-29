@@ -148,9 +148,32 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery) {
 
 	srtKey := fmt.Sprintf("%s/%s.srt", c.captionsPrefix, req.VideoId)
 
-
 	if err := processor.Process(ctx, req, c.bucketName, c.captionsPrefix, c.transcriberJobPrefix, c.s3Client, c.logger); err != nil {
 		c.logger.Error("captions processing failed", zap.Error(err), zap.String("videoId", req.VideoId))
+		
+		// Check retry count (if available in headers)
+		retryCount := 0
+		if d.Headers != nil {
+			if count, ok := d.Headers["x-retry-count"].(int32); ok {
+				retryCount = int(count)
+			}
+		}
+		
+		// Temporary fix: Don't requeue this specific problematic video
+		if req.VideoId == "63ae5a57-8321-44aa-b038-99e28084bcd1" {
+			c.logger.Info("Discarding known problematic message", zap.String("videoId", req.VideoId))
+			d.Ack(false) // Acknowledge to remove from queue
+			return
+		}
+		
+		// Don't retry more than 3 times for any message
+		if retryCount >= 3 {
+			c.logger.Error("Message exceeded retry limit, discarding", 
+				zap.String("videoId", req.VideoId), 
+				zap.Int("retryCount", retryCount))
+			d.Ack(false) // Acknowledge to remove from queue
+			return
+		}
 		
 		d.Nack(false, true)
 		return

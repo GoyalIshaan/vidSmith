@@ -6,15 +6,66 @@ import { readFileSync } from "fs";
 import path from "path";
 import "dotenv/config";
 import { drizzle } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
 import { UploadClient } from "./clients/uploadClient";
 import { MetadataClient } from "./clients/metadataClient";
 import { resolvers } from "./resolvers";
 import codegenMercurius from "mercurius-codegen";
 import { startConsuming } from "./messaging/consumer";
 
-export const DB = drizzle(process.env.DATABASE_URL!);
+// Create PostgreSQL connection pool for Neon DB
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL!,
+  ssl: {
+    rejectUnauthorized: false, // Required for Neon DB
+  },
+  max: 20,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 2000,
+});
+
+export const DB = drizzle(pool);
+
+// Add error handling for database pool
+pool.on("error", (err, client) => {
+  console.error("Unexpected error on idle client", err);
+  process.exit(-1);
+});
 
 const app = Fastify({ logger: true });
+
+// Add health check endpoint
+app.get("/health", async (request, reply) => {
+  try {
+    // Test basic database connection
+    await pool.query("SELECT 1");
+
+    // Test if videos table exists
+    const tableCheck = await pool.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name = 'videos'
+      );
+    `);
+
+    const hasVideosTable = tableCheck.rows[0].exists;
+
+    reply.send({
+      status: "ok",
+      database: "connected",
+      videosTable: hasVideosTable ? "exists" : "missing",
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    reply.code(503).send({
+      status: "error",
+      database: "disconnected",
+      error: error instanceof Error ? error.message : "Unknown error",
+      timestamp: new Date().toISOString(),
+    });
+  }
+});
 
 // Register CORS plugin
 app.register(cors, {

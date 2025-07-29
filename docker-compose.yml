@@ -1,0 +1,20 @@
+version: "3.8"
+
+services:
+  gateway:
+    build:
+      context: ./services/gateway
+      dockerfile: Dockerfile
+    environment:
+      # Replace with your actual Neon DB connection string
+      DATABASE_URL: ${DATABASE_URL}
+      PORT: 3000
+      # Add other environment variables as needed
+      AMQP_URL: ${AMQP_URL:-amqp://localhost:5672}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      BUCKET_NAME: ${BUCKET_NAME:-your-bucket}
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./services/gateway:/app
+      - /app/node_modules
