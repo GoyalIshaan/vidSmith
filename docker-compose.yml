@@ -1,6 +1,17 @@
 version: "3.8"
 
 services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-admin}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-password}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
   gateway:
     build:
       context: ./services/gateway
@@ -10,7 +21,7 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       PORT: 3000
       # Add other environment variables as needed
-      AMQP_URL: ${AMQP_URL:-amqp://localhost:5672}
+      AMQP_URL: ${AMQP_URL:-amqp://admin:password@rabbitmq:5672}
       AWS_REGION: ${AWS_REGION:-us-east-1}
       BUCKET_NAME: ${BUCKET_NAME:-your-bucket}
     ports:
@@ -18,3 +29,44 @@ services:
     volumes:
       - ./services/gateway:/app
       - /app/node_modules
+
+  censor:
+    build:
+      context: ./services/censor
+      dockerfile: Dockerfile
+    environment:
+      AMQP_URL: ${AMQP_URL:-amqp://admin:password@rabbitmq:5672}
+      BUCKET_NAME: ${BUCKET_NAME:-vidsmith-bucket}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      DATABASE_URL: ${DATABASE_URL}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+    depends_on:
+      - rabbitmq
+
+  captions:
+    build:
+      context: ./services/captions
+      dockerfile: Dockerfile
+    environment:
+      AMQP_URL: ${AMQP_URL:-amqp://admin:password@rabbitmq:5672}
+      BUCKET_NAME: ${BUCKET_NAME:-vidsmith-bucket}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      CAPTIONS_PREFIX: ${CAPTIONS_PREFIX:-captions/srt}
+      TRANSCRIBER_JOB_PREFIX: ${TRANSCRIBER_JOB_PREFIX:-captions/job}
+    depends_on:
+      - rabbitmq
+
+  transcoder:
+    build:
+      context: ./services/transcoder
+      dockerfile: Dockerfile
+    environment:
+      AMQP_URL: ${AMQP_URL:-amqp://admin:password@rabbitmq:5672}
+      BUCKET_NAME: ${BUCKET_NAME:-vidsmith-bucket}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      FFMPEG_PATH: ${FFMPEG_PATH:-ffmpeg}
+      ORIGINAL_PREFIX: ${ORIGINAL_PREFIX:-uploads/originals}
+      TRANSCODED_PREFIX: ${TRANSCODED_PREFIX:-transcoded}
+      MANIFEST_PREFIX: ${MANIFEST_PREFIX:-manifests}
+    depends_on:
+      - rabbitmq

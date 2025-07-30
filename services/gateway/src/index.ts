@@ -21,7 +21,7 @@ const pool = new Pool({
   },
   max: 20,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
+  connectionTimeoutMillis: 10000, // Increased timeout
 });
 
 export const DB = drizzle(pool);
@@ -29,8 +29,34 @@ export const DB = drizzle(pool);
 // Add error handling for database pool
 pool.on("error", (err, client) => {
   console.error("Unexpected error on idle client", err);
-  process.exit(-1);
+  // Don't exit process, just log the error
 });
+
+// Test database connection on startup
+async function testDatabaseConnection() {
+  let retries = 5;
+  while (retries > 0) {
+    try {
+      const client = await pool.connect();
+      await client.query("SELECT 1");
+      client.release();
+      console.log("✅ Database connection successful");
+      return true;
+    } catch (error) {
+      console.error(
+        `❌ Database connection failed (attempt ${6 - retries}/5):`,
+        error
+      );
+      retries--;
+      if (retries === 0) {
+        console.error("❌ Failed to connect to database after 5 attempts");
+        return false;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2000)); // Wait 2 seconds before retry
+    }
+  }
+  return false;
+}
 
 const app = Fastify({ logger: true });
 
@@ -111,6 +137,15 @@ startConsuming();
 
 async function start() {
   try {
+    // Test database connection before starting server
+    console.log("🔍 Testing database connection...");
+    const dbConnected = await testDatabaseConnection();
+
+    if (!dbConnected) {
+      console.error("❌ Cannot start server without database connection");
+      process.exit(1);
+    }
+
     await app.listen({
       port: Number(process.env.PORT) || 3000,
       host: "0.0.0.0",

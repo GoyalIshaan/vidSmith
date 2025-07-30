@@ -51,7 +51,10 @@ export class UploadClient {
         key: s3Key,
       };
     } catch (error) {
-      console.error(error);
+      console.error("❌ Upload initiation failed:", error);
+      if (error instanceof Error) {
+        throw new Error(`Failed to initiate upload: ${error.message}`);
+      }
       throw new Error("Failed to initiate upload");
     }
   }

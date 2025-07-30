@@ -4,15 +4,15 @@ import dotenv from "dotenv";
 dotenv.config();
 
 // Debug: Log environment variables (remove in production)
-console.log("AWS Environment Variables:");
+console.log("🔍 AWS Environment Variables Check:");
 console.log("AWS_REGION:", process.env.AWS_REGION);
 console.log(
   "AWS_ACCESS_KEY_ID:",
-  process.env.AWS_ACCESS_KEY_ID ? "SET" : "NOT SET"
+  process.env.AWS_ACCESS_KEY_ID ? "✅ SET" : "❌ NOT SET"
 );
 console.log(
   "AWS_SECRET_ACCESS_KEY:",
-  process.env.AWS_SECRET_ACCESS_KEY ? "SET" : "NOT SET"
+  process.env.AWS_SECRET_ACCESS_KEY ? "✅ SET" : "❌ NOT SET"
 );
 console.log("AWS_BUCKET_NAME:", process.env.AWS_BUCKET_NAME);
 

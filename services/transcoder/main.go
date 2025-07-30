@@ -8,6 +8,7 @@ import (
 
 	"github.com/GoyalIshaan/vidSmith/services/transcoder/internal/config"
 	"github.com/GoyalIshaan/vidSmith/services/transcoder/internal/rabbit"
+	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/streadway/amqp"
@@ -23,7 +24,9 @@ func main() {
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()
 
-	session := session.Must(session.NewSession())
+	session := session.Must(session.NewSession(&aws.Config{
+		Region: aws.String(config.AWSRegion),
+	}))
 	s3Client := s3.New(session)
 
 	rabbitConnection, err := amqp.Dial(config.AmqpURL)
