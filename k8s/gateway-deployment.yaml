@@ -3,7 +3,12 @@ kind: Deployment
 metadata:
   name: gateway
 spec:
-  replicas: 1
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
   selector:
     matchLabels:
       app: gateway
@@ -15,35 +20,47 @@ spec:
       containers:
         - name: gateway
           image: gateway:dev
+          imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 3000
-          env:
-            - name: DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: gateway-secret
-                  key: DATABASE_URL
-            - name: AMQP_URL
-              valueFrom:
-                secretKeyRef:
-                  name: gateway-secret
-                  key: AMQP_URL
-            - name: AWS_ACCESS_KEY_ID
-              valueFrom:
-                secretKeyRef:
-                  name: gateway-secret
-            - name: AWS_SECRET_ACCESS_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: gateway-secret
-                  key: AWS_SECRET_ACCESS_KEY
-            - name: AWS_REGION
-              valueFrom:
-                configMapKeyRef:
-                  name: gateway-config
-                  key: AWS_REGION
-            - name: AWS_BUCKET_NAME
-              valueFrom:
-                configMapKeyRef:
-                  name: gateway-config
-                  key: AWS_BUCKET_NAME
+            - name: http
+              containerPort: 3000
+          envFrom:
+            - secretRef:
+                name: gateway-secret
+            - configMapRef:
+                name: gateway-config
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1024Mi"
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 3
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 3000
+            allowPrivilegeEscalation: false
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: gateway
+                topologyKey: kubernetes.io/hostname
