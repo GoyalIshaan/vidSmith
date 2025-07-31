@@ -12,5 +12,7 @@ COPY . .
 
 EXPOSE 3000
 
+RUN apk add --no-cache ca-certificates && update-ca-certificates
+
 # Default command to run the application
-CMD ["bun", "run", "dev"]
+ENTRYPOINT ["bun", "run", "dev"]

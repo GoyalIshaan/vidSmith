@@ -5,95 +5,18 @@ import cors from "@fastify/cors";
 import { readFileSync } from "fs";
 import path from "path";
 import "dotenv/config";
-import { drizzle } from "drizzle-orm/node-postgres";
-import { Pool } from "pg";
 import { UploadClient } from "./clients/uploadClient";
 import { MetadataClient } from "./clients/metadataClient";
 import { resolvers } from "./resolvers";
 import codegenMercurius from "mercurius-codegen";
 import { startConsuming } from "./messaging/consumer";
-
-// Create PostgreSQL connection pool for Neon DB
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL!,
-  ssl: {
-    rejectUnauthorized: false, // Required for Neon DB
-  },
-  max: 20,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 10000, // Increased timeout
-});
-
-export const DB = drizzle(pool);
-
-// Add error handling for database pool
-pool.on("error", (err, client) => {
-  console.error("Unexpected error on idle client", err);
-  // Don't exit process, just log the error
-});
-
-// Test database connection on startup
-async function testDatabaseConnection() {
-  let retries = 5;
-  while (retries > 0) {
-    try {
-      const client = await pool.connect();
-      await client.query("SELECT 1");
-      client.release();
-      console.log("✅ Database connection successful");
-      return true;
-    } catch (error) {
-      console.error(
-        `❌ Database connection failed (attempt ${6 - retries}/5):`,
-        error
-      );
-      retries--;
-      if (retries === 0) {
-        console.error("❌ Failed to connect to database after 5 attempts");
-        return false;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 2000)); // Wait 2 seconds before retry
-    }
-  }
-  return false;
-}
+import { testDatabaseConnection } from "./db/dbSetup";
+import { healthCheckPlugin } from "./health/healthCheck";
 
 const app = Fastify({ logger: true });
 
-// Add health check endpoint
-app.get("/health", async (request, reply) => {
-  try {
-    // Test basic database connection
-    await pool.query("SELECT 1");
+app.register(healthCheckPlugin);
 
-    // Test if videos table exists
-    const tableCheck = await pool.query(`
-      SELECT EXISTS (
-        SELECT FROM information_schema.tables 
-        WHERE table_schema = 'public' 
-        AND table_name = 'videos'
-      );
-    `);
-
-    const hasVideosTable = tableCheck.rows[0].exists;
-
-    reply.send({
-      status: "ok",
-      database: "connected",
-      videosTable: hasVideosTable ? "exists" : "missing",
-      timestamp: new Date().toISOString(),
-    });
-  } catch (error) {
-    reply.code(503).send({
-      status: "error",
-      database: "disconnected",
-      error: error instanceof Error ? error.message : "Unknown error",
-      timestamp: new Date().toISOString(),
-    });
-  }
-});
-
-// Register CORS plugin
 app.register(cors, {
   origin: ["http://localhost:5173", "http://127.0.0.1:5173"],
   credentials: true,
@@ -137,8 +60,6 @@ startConsuming();
 
 async function start() {
   try {
-    // Test database connection before starting server
-    console.log("🔍 Testing database connection...");
     const dbConnected = await testDatabaseConnection();
 
     if (!dbConnected) {

@@ -1,6 +1,6 @@
 import type { Resolvers } from "./types/graphql";
 import type { Video } from "./types/graphql";
-import { DB } from "./index";
+import { DB } from "./db/dbSetup";
 import { videosTable } from "./db/schema";
 import { eq } from "drizzle-orm";
 

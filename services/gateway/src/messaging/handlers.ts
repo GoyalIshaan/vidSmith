@@ -3,7 +3,7 @@ import type {
   captionsUpdateMessage,
   transcoderUpdateMessage,
 } from "../types/rabbit";
-import { DB } from "../index";
+import { DB } from "../db/dbSetup";
 import { videosTable } from "../db/schema";
 import { eq, sql } from "drizzle-orm";
 

@@ -1,4 +1,4 @@
-import { DB } from "../index";
+import { DB } from "../db/dbSetup";
 import { videosTable } from "../db/schema";
 import { eq } from "drizzle-orm";
 
