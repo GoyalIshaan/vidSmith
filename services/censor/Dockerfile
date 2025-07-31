@@ -12,6 +12,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o censor-service .
 
 FROM alpine:3.22
 
+EXPOSE 4000
+
 RUN apk add --no-cache ca-certificates && update-ca-certificates
 
 

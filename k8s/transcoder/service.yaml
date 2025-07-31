@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: transcoder
+spec:
+  type: ClusterIP
+  selector:
+    app: transcoder
+  ports:
+    - name: service-port
+      port: 81
+      targetPort: container-port
+      protocol: TCP
+  sessionAffinity: None

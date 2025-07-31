@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -42,12 +43,32 @@ func main() {
 	}
 	defer rabbitChannel.Close()
 
-	
-
 	rabbitConsumer, err := rabbit.NewConsumer(rabbitChannel, logger, config.BucketName, config.CaptionsPrefix, config.TranscriberJobPrefix, s3Client)
 	if err != nil {
 		panic("failed to create RabbitMQ consumer: " + err.Error())
 	}
+
+	// Start HTTP server for health checks
+	go func() {
+		http.HandleFunc("/ready", func(w http.ResponseWriter, r *http.Request) {
+			if rabbitConnection.IsClosed() {
+				http.Error(w, "RabbitMQ connection closed", http.StatusServiceUnavailable)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("ready"))
+		})
+
+		http.HandleFunc("/live", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("alive"))
+		})
+
+		logger.Info("Starting HTTP server for health checks", zap.String("port", "4000"))
+		if err := http.ListenAndServe(":4000", nil); err != nil {
+			logger.Error("HTTP server error", zap.Error(err))
+		}
+	}()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	sigs := make(chan os.Signal, 1)

@@ -3,7 +3,16 @@ import { sql } from "drizzle-orm";
 import { pool } from "../db/dbSetup";
 
 export async function healthCheckPlugin(fastify: FastifyInstance) {
-  fastify.get("/health", async (request, reply) => {
+  // Liveness probe - simple check if service is running
+  fastify.get("/live", async (request, reply) => {
+    reply.send({
+      status: "alive",
+      timestamp: new Date().toISOString(),
+    });
+  });
+
+  // Readiness probe - check if service is ready to receive traffic
+  fastify.get("/ready", async (request, reply) => {
     try {
       // Test basic database connection
       await pool.query("SELECT 1");
@@ -19,15 +28,25 @@ export async function healthCheckPlugin(fastify: FastifyInstance) {
 
       const hasVideosTable = tableCheck.rows[0].exists;
 
+      if (!hasVideosTable) {
+        reply.code(503).send({
+          status: "not ready",
+          database: "connected",
+          videosTable: "missing",
+          timestamp: new Date().toISOString(),
+        });
+        return;
+      }
+
       reply.send({
-        status: "ok",
+        status: "ready",
         database: "connected",
-        videosTable: hasVideosTable ? "exists" : "missing",
+        videosTable: "exists",
         timestamp: new Date().toISOString(),
       });
     } catch (error) {
       reply.code(503).send({
-        status: "error",
+        status: "not ready",
         database: "disconnected",
         error: error instanceof Error ? error.message : "Unknown error",
         timestamp: new Date().toISOString(),

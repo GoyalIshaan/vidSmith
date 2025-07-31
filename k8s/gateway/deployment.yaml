@@ -26,9 +26,9 @@ spec:
               containerPort: 3000
           envFrom:
             - secretRef:
-                name: gateway-secret
+                name: cluster-secret
             - configMapRef:
-                name: gateway-config
+                name: cluster-config
           resources:
             requests:
               cpu: "100m"
