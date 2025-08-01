@@ -2,3 +2,44 @@
 
 k8s/secret.yaml
 
+.pem
+
+# Certificate files
+*.pem
+*.crt
+*.key
+*.p12
+*.pfx
+*.cer
+*.der
+*.crt
+*.pem
+*.key
+*.p12
+*.pfx
+*.cer
+*.der
+
+# Kubernetes secrets and certificates
+k8s/*.pem
+k8s/*.crt
+k8s/*.key
+k8s/*.p12
+k8s/*.pfx
+k8s/*.cer
+k8s/*.der
+k8s/secrets/
+k8s/certs/
+k8s/tls/
+
+# TLS certificates
+k8s/tls-secret.yaml
+k8s/tls-secret.yml
+k8s/cert-secret.yaml
+k8s/cert-secret.yml
+
+# Certificate directories
+k8s/certificates/
+k8s/certs/
+k8s/tls/
+k8s/secrets/

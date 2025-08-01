@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: captions
+  name: captions-service
 spec:
   type: ClusterIP
   selector:

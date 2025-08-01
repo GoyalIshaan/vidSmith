@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: transcoder
+  name: transcoder-deployment
   labels:
     app: transcoder
     environment: dev
@@ -22,7 +22,7 @@ spec:
     spec:
       containers:
         - name: transcoder
-          image: transcoder-service:dev
+          image: ishaankundesu/vidsmith:transcoder-1.0
           imagePullPolicy: IfNotPresent
           ports:
             - name: container-port
@@ -57,7 +57,6 @@ spec:
           securityContext:
             runAsUser: 1000
             runAsGroup: 3000
-            fsGroup: 2000
             allowPrivilegeEscalation: false
       affinity:
         podAntiAffinity:

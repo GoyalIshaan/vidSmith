@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: captions
+  name: captions-deployment
   labels:
     app: captions
     environment: dev
@@ -22,7 +22,7 @@ spec:
     spec:
       containers:
         - name: captions
-          image: captions-service:dev
+          image: ishaankundesu/vidsmith:captions-1.0
           imagePullPolicy: IfNotPresent
           ports:
             - name: container-port
@@ -57,7 +57,6 @@ spec:
           securityContext:
             runAsUser: 1000
             runAsGroup: 3000
-            fsGroup: 2000
             allowPrivilegeEscalation: false
       affinity:
         podAntiAffinity:

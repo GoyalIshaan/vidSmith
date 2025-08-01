@@ -1,7 +1,7 @@
 import { ApolloClient, InMemoryCache, createHttpLink } from "@apollo/client";
 
 const httpLink = createHttpLink({
-  uri: "http://localhost:3000/graphql", // Your gateway GraphQL endpoint
+  uri: "https://vidsmith.local:8443/graphql", // Your gateway GraphQL endpoint
 });
 
 export const client = new ApolloClient({

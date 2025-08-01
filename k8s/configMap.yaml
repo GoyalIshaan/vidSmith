@@ -5,3 +5,4 @@ metadata:
 data:
   AWS_REGION: us-east-2
   AWS_BUCKET_NAME: vidsmith-bucket
+  BUCKET_NAME: vidsmith-bucket
