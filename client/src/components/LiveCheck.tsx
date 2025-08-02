@@ -16,7 +16,7 @@ const LiveCheck = () => {
     try {
       setStatus({ isLive: false, loading: true });
 
-      const response = await fetch("https://vidsmith.local:8443/live", {
+      const response = await fetch("https://api.vidsmith.org/live", {
         method: "GET",
         headers: {
           "Content-Type": "application/json",

@@ -4,18 +4,21 @@ metadata:
   name: ingress
   annotations:
     # Automatically redirect all HTTP traffic to HTTPS
+    cert-manager.io/cluster-issuer: letsencrypt-prod
     nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+  labels:
+    app: ingress
 spec:
   ingressClassName: nginx
-  # TLS configuration for HTTPS termination
+
   tls:
     - hosts:
-        - vidsmith.local
+        - api.vidsmith.org
       secretName: tls-secret
 
   # Host- and path-based routing rules
   rules:
-    - host: vidsmith.local
+    - host: api.vidsmith.org
       http:
         paths:
           - path: /
