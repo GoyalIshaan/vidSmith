@@ -22,8 +22,8 @@ spec:
     spec:
       containers:
         - name: censor
-          image: ishaankundesu/vidsmith:censor-1.0
-          imagePullPolicy: IfNotPresent
+          image: 872515258753.dkr.ecr.us-east-2.amazonaws.com/censor:censor-1.0
+          imagePullPolicy: Always
           ports:
             - name: container-port
               containerPort: 4000

@@ -17,8 +17,13 @@ const app = Fastify({ logger: true });
 
 app.register(healthCheckPlugin);
 
+// Parse allowed origins from environment variable
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(",").map((origin) => origin.trim())
+  : ["http://localhost:5173", "http://127.0.0.1:5173"];
+
 app.register(cors, {
-  origin: ["http://localhost:5173", "http://127.0.0.1:5173"],
+  origin: allowedOrigins,
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
