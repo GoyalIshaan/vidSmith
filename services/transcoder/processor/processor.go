@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
+	"github.com/fsnotify/fsnotify"
 	"go.uber.org/zap"
 )
 
@@ -42,7 +44,7 @@ func Process(
 	s3Client *s3.S3,
 	sess *session.Session,
 	logger *zap.Logger,
-) (result string, err error) {
+) error {
 	// Confirm that the Process function has been entered.
 	logger.Info("processor.Process function entered")
 	
@@ -51,107 +53,88 @@ func Process(
 	}
 
 	originalKey := fmt.Sprintf("%s/%s", "originals", request.S3Key)
-	manifestKey := fmt.Sprintf("%s/%s.m3u8", manifestPrefix, request.VideoId)
-
-	// Download the source file to a temporary local file first
-	tempInputPath, _, err := downloadToTemp(ctx, s3Client, bucketName, originalKey, logger)
-	if err != nil {
-		logger.Error("failed to download original file from S3", zap.Error(err), zap.String("s3Key", originalKey))
-		return "", fmt.Errorf("failed to download original file: %w", err)
-	}
-	// Ensure the temporary file is deleted after the function completes.
-	defer os.Remove(tempInputPath)
 
 	uploader := s3manager.NewUploader(sess, func(u *s3manager.Uploader) {
 		u.PartSize = 10 * 1024 * 1024 // 10MB parts
 		u.Concurrency = 5
 	})
 
+	stagingDir, err := os.MkdirTemp("", "transcoder-"+ request.VideoId)
+	if err != nil {
+		return fmt.Errorf("create staging directory: %w", err)
+	}
+	defer os.RemoveAll(stagingDir)
+
 	// Transcode for each rendition using the downloaded local file.
 	for _, r := range renditions {
-		if err := transcodeOneRendition(ctx, uploader, bucketName, tempInputPath, keyFor(r), r, logger); err != nil {
-			return "", fmt.Errorf("rendition %s: %w", r.Name, err)
+		if err := transcodeOneRendition(ctx, uploader, s3Client, bucketName, originalKey, keyFor(r), stagingDir, r, logger); err != nil {
+			return fmt.Errorf("rendition %s: %w", r.Name, err)
 		}
 	}
 
-	// Build a simple manifest file (placeholder for HLS).
-	// For a real HLS implementation, you would generate a proper manifest with EXT-X-STREAM-INF tags.
-	endpoint := fmt.Sprintf("https://%s.s3.%s.amazonaws.com", bucketName, aws.StringValue(s3Client.Config.Region))
-	manifest, err := buildManifest(endpoint, keyFor(renditions[0]), keyFor(renditions[1]), keyFor(renditions[2]))
-	if err != nil {
-		return "", fmt.Errorf("build manifest: %w", err)
-	}
-
-	// Upload the manifest to S3.
-	if _, err := s3Client.PutObject(&s3.PutObjectInput{
-		Bucket:      aws.String(bucketName),
-		Key:         aws.String(manifestKey),
-		Body:        strings.NewReader(manifest),
-		ContentType: aws.String("application/vnd.apple.mpegurl"),
-	}); err != nil {
-		return "", fmt.Errorf("upload manifest: %w", err)
-	}
-	logger.Info("manifest uploaded", zap.String("key", manifestKey))
-	return manifestKey, nil
+	return nil
 }
 
 func transcodeOneRendition(
 	ctx context.Context,
 	uploader *s3manager.Uploader,
-	bucketName, tempInputPath, outKey string,
+	s3Client *s3.S3,
+	bucketName, originalKey, outKey, stagingDir string,
 	r renditionSpec,
 	logger *zap.Logger,
 ) error {
 	log := logger.With(zap.String("rendition", r.Name))
-	log.Info("transcoding start", zap.String("scale", r.Scale), zap.String("outKey", outKey))
 
-	// pipe to stream ffmpeg's output directly to the S3 uploader
-	prOut, pwOut := io.Pipe()
+	reditionDirKey := fmt.Sprintf("%s/%s", stagingDir, r.Name)
+	if err := os.MkdirAll(reditionDirKey, 0755); err != nil {
+		return fmt.Errorf("create rendition directory: %w", err)
+	}
 
-	ffmpegArgs := buildFFmpegArgs(r, tempInputPath)
+	watcherErrCh := make(chan error, 1)
+	uploadErrCh := make(chan error, 1)
+	cancelCtx, cancel := context.WithCancel(context.Background())
+	go watchAndUpload(cancelCtx, uploader, bucketName, outKey, stagingDir, r, log, watcherErrCh, uploadErrCh)
+
+	// pipe to stream s3 object to ffmpeg
+	prIn, pwIn := io.Pipe()
+
+	downloadErrCh := make(chan error, 1)
+	copyErrCh := make(chan error, 1)
+	
+	go func() {
+		defer pwIn.Close()
+		streamS3Object(ctx, s3Client, bucketName, originalKey, pwIn, downloadErrCh, copyErrCh, log)
+	}()
+
+	ffmpegArgs := buildFFmpegArgs(r, reditionDirKey)
 
 	ffmpegCommand := exec.CommandContext(ctx, "ffmpeg", ffmpegArgs...) // prepares an external command to run by the system
-	ffmpegCommand.Stdout = pwOut // Pipe ffmpeg's standard output to our pipe writer.
-	ffmpegCommand.Stdin = nil    // No standard input is needed as we provide a file path.
+	ffmpegCommand.Stdin = prIn
 
 	// Capture stderr for debugging purposes.
 	var stderrBuf bytes.Buffer
 	ffmpegCommand.Stderr = &stderrBuf
-
-	// Start the S3 upload in a separate goroutine.
-	uploadErrCh := make(chan error, 1)
-	go func() {
-		defer close(uploadErrCh)
-		log.Info("upload start", zap.String("bucket", bucketName), zap.String("key", outKey))
-		_, upErr := uploader.UploadWithContext(ctx, &s3manager.UploadInput{
-			Bucket: aws.String(bucketName),
-			Key:    aws.String(outKey),
-			Body:   prOut,
-		})
-		if upErr != nil {
-			log.Error("upload failed", zap.Error(upErr))
-		} else {
-			log.Info("upload finished")
-		}
-		uploadErrCh <- upErr
-	}()
 
 	start := time.Now()
 	log.Info("ffmpeg started")
 
 	ffmpegError := ffmpegCommand.Run()
 
-	pwOut.Close()
+	cancel()
 
 	if ffmpegError != nil {
-		log.Error("ffmpeg failed", zap.Error(ffmpegError), zap.String("stderr", truncateError(stderrBuf.String(), 8000)),)
-
-		prOut.CloseWithError(ffmpegError)
+		log.Error("ffmpeg failed", zap.Error(ffmpegError), zap.String("stderr", stderrBuf.String()))
 		return fmt.Errorf("ffmpeg (%s): %w\nstderr:\n%s", r.Name, ffmpegError, stderrBuf.String())
 	}
 
 	// Wait for the upload to complete and check for any errors.
 	upErr := <-uploadErrCh
+	downErr := <-downloadErrCh
+
+	if downErr != nil {
+		return fmt.Errorf("s3 download: %w", downErr)
+	}
+
 	if upErr != nil {
 		return fmt.Errorf("s3 upload: %w", upErr)
 	}
@@ -162,10 +145,34 @@ func transcodeOneRendition(
 	return nil
 }
 
-func buildFFmpegArgs(r renditionSpec, inputPath string) []string {
+func streamS3Object(ctx context.Context, s3Client *s3.S3, bucketName, originalKey string, pwIn *io.PipeWriter, downloadErrCh chan error, copyErrCh chan error, logger *zap.Logger) {
+	logger.Info("download start", zap.String("bucket", bucketName), zap.String("key", originalKey))
+	
+	// Get object from S3 and stream to pipe
+	result, downErr := s3Client.GetObjectWithContext(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(bucketName),
+		Key:    aws.String(originalKey),
+	})
+
+	downloadErrCh <- downErr
+	
+	defer result.Body.Close()
+	_, copyErr := io.Copy(pwIn, result.Body)
+
+	copyErrCh <- copyErr
+
+	pwIn.Close()
+
+	logger.Info("download finished")
+}
+
+func buildFFmpegArgs(r renditionSpec, outDir string) []string {
+	hlsSegmentFilename := filepath.Join(outDir, "%d.m4s")
+    hlsPlaylistName := filepath.Join(outDir, "playlist.m3u8")	
+	
 	return []string{
 		"-hide_banner",
-		"-i", inputPath, // Use the local file path as input.
+		"-i", "-", // use stdin as input
 		"-map", "0:v:0", // Map the first video stream.
 		"-map", "0:a:0?", // Map the first audio stream, if it exists.
 		"-vf", "scale=" + r.Scale,
@@ -185,58 +192,92 @@ func buildFFmpegArgs(r renditionSpec, inputPath string) []string {
 
 		// --- Output container settings ---
 		"-movflags", "frag_keyframe+empty_moov", // Optimize for streaming.
-		"-f", "mp4",
-		"pipe:1", // Output to standard output.
+		"-f", "hls",
+		"-hls_time", "4",
+        "-hls_playlist_type", "vod", "-hls_segment_type", "fmp4",
+
+        "-hls_segment_filename", hlsSegmentFilename,
+        hlsPlaylistName,
 	}
 }
 
-func downloadToTemp(ctx context.Context, s3Client *s3.S3, bucket, key string, logger *zap.Logger) (string, int64, error) {
-	out, err := s3Client.GetObjectWithContext(ctx, &s3.GetObjectInput{
-		Bucket: aws.String(bucket),
-		Key:    aws.String(key),
+func watchAndUpload(ctx context.Context, 
+	uploader *s3manager.Uploader, 
+	bucketName, outKey, stagingDir string, 
+	r renditionSpec, 
+	logger *zap.Logger, 
+	errCh chan error,
+	uploadErrCh chan error,
+	) {
+	
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		errCh <- fmt.Errorf("create watcher: %w", err)
+		return
+	}
+	defer watcher.Close()
+
+	if err := watcher.Add(stagingDir); err != nil {
+		errCh <- fmt.Errorf("add watcher: %w", err)
+		return
+	}
+
+	for {
+		select {
+			case event, ok := <-watcher.Events:{
+				if !ok {return}
+				if event.Op&fsnotify.Write == fsnotify.Write {
+					segmentName := filepath.Base(event.Name)
+					if strings.HasSuffix(event.Name, ".m3u8") {
+						continue
+					}
+					logger.Info("file written", zap.String("file", event.Name))
+					go uploadSegment(ctx, event.Name, outKey, segmentName, uploader, bucketName, r, logger, uploadErrCh)
+				}
+			}
+			case err, ok := <-watcher.Errors:{
+				if !ok {
+					errCh <- fmt.Errorf("watcher error: %w", err)
+					return
+				}
+				logger.Error("watcher error", zap.Error(err))
+			}
+			case <-ctx.Done():{
+				return
+			}
+		}
+	}
+}
+
+func uploadSegment(ctx context.Context, filePath, outKey, segName string, uploader *s3manager.Uploader, bucketName string, r renditionSpec, logger *zap.Logger, uploadErrCh chan error) {
+	// Try to open file with exclusive lock, retry up to 50 times
+	var file *os.File
+	var err error
+	for i := 0; i < 50; i++ {
+		file, err = os.OpenFile(filePath, os.O_RDONLY|os.O_EXCL, 0)
+		if err == nil {
+			break // File is ready to read
+		}
+		// File is still being written, wait and retry
+		time.Sleep(1000 * time.Millisecond)
+	}
+	
+	if err != nil {
+		uploadErrCh <- fmt.Errorf("failed to open segment for upload: %w", err)
+		return
+	}
+
+	s3Key := fmt.Sprintf("%s/%s/%s", outKey, r.Name, segName)
+	defer file.Close()
+	_, err = uploader.UploadWithContext(ctx, &s3manager.UploadInput{
+		Bucket: aws.String(bucketName), 
+		Key: aws.String(s3Key), 
+		Body: file,
 	})
 	if err != nil {
-		return "", 0, fmt.Errorf("get object: %w", err)
+		uploadErrCh <- fmt.Errorf("failed to upload segment: %w", err)
+		return
 	}
-	defer out.Body.Close()
-
-	// Create a temporary file to store the download.
-	tmpFile, err := os.CreateTemp("", "vidsmith-original-*.mp4")
-	if err != nil {
-		return "", 0, fmt.Errorf("create temp file: %w", err)
-	}
-	defer tmpFile.Close()
-
-	// Copy the S3 object body to the temporary file.
-	written, copyErr := io.Copy(tmpFile, out.Body)
-	if copyErr != nil {
-		// Clean up the failed temp file before returning.
-		os.Remove(tmpFile.Name())
-		return "", 0, fmt.Errorf("copy to temp file: %w", copyErr)
-	}
-
-	logger.Info("downloaded original to temp file")
-	return tmpFile.Name(), written, nil
-}
-
-func truncateError(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max] + "...[truncated]"
-}
-
-// buildManifest creates a very basic playlist file.
-// NOTE: This is not a valid HLS manifest for adaptive bitrate streaming.
-// A proper implementation would use #EXT-X-STREAM-INF tags.
-func buildManifest(endpoint, key1080, key720, key480 string) (string, error) {
-	var b strings.Builder
-	b.WriteString("#EXTM3U\n")
-	b.WriteString("#EXT-X-VERSION:3\n")
-	// TODO: Replace with proper EXT-X-STREAM-INF entries for real HLS.
-	b.WriteString("# This is a placeholder manifest.\n")
-	b.WriteString(endpoint + "/" + key1080 + "\n")
-	b.WriteString(endpoint + "/" + key720 + "\n")
-	b.WriteString(endpoint + "/" + key480 + "\n")
-	return b.String(), nil
+	logger.Info("Uploaded segment", zap.String("segment", segName))
+	os.Remove(filePath)
 }
