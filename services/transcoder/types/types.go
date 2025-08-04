@@ -5,8 +5,8 @@ type TranscodeRequest struct {
 	S3Key      string `json:"s3Key"`
 }
 
-type UpdateVideoStatusEvent struct {
+type TranscodingCompleteEvent struct {
 	VideoId string `json:"VideoId"`
-	Phase string `json:"Phase"`
-	ManifestKey string `json:"ManifestKey"`
+	Phase string `json:"Phase"`	
 }
+

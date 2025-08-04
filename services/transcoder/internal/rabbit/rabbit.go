@@ -105,13 +105,13 @@ func (c *Consumer) Consume(ctx context.Context, bucketName string, transcodedPre
 
 			go func(delivery amqp.Delivery) {
 				defer func() { <-semaphore }() // Release semaphore slot
-				c.handle(ctx, delivery, bucketName, transcodedPrefix, manifestPrefix, s3Client, awsSession)
+				c.handle(ctx, delivery, bucketName, transcodedPrefix, s3Client, awsSession)
 			}(d)
 		}
 	}
 }
 
-func (c *Consumer) handle(ctx context.Context, d amqp.Delivery, bucketName string, transcodedPrefix string, manifestPrefix string, s3Client *s3.S3, awsSession *session.Session) {
+func (c *Consumer) handle(ctx context.Context, d amqp.Delivery, bucketName string, transcodedPrefix string, s3Client *s3.S3, awsSession *session.Session) {
 	defer func() {
 		// Recover from panic and nack the message
 		if r := recover(); r != nil {
@@ -132,7 +132,7 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery, bucketName strin
 	// Use the existing s3Client's session instead of creating a new one
 	// invoking the transcoding service
 
-	manifestKey, err := processor.Process(ctx, req, bucketName, transcodedPrefix, manifestPrefix, s3Client, awsSession, c.logger)
+	err := processor.Process(ctx, req, bucketName, transcodedPrefix, s3Client, awsSession, c.logger)
 	if err != nil {
 		c.logger.Error("transcoding failed", zap.Error(err))
 		d.Nack(false, true) // requeue for retry
@@ -141,15 +141,14 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery, bucketName strin
 
 	d.Ack(false)
 
-	updateVideoStatusEvent := types.UpdateVideoStatusEvent{
+	transcodingCompleteEvent := types.TranscodingCompleteEvent{
 		VideoId: req.VideoId,
 		Phase: "transcode",
-		ManifestKey: manifestKey,
 	}
 	maxRetries := 3
 	var emitErr error
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		emitErr = c.emit("updateVideoStatus", updateVideoStatusEvent)
+		emitErr = c.emit("updateVideoStatus", transcodingCompleteEvent)
 		if emitErr == nil {
 			break // Success, exit retry loop
 		}
@@ -165,8 +164,33 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery, bucketName strin
 		}
 	}
 	
+	
 	if emitErr != nil {
 		c.logger.Error("failed to publish updateVideoStatus event after all retries", 
+			zap.Error(emitErr), 
+			zap.String("videoId", req.VideoId))
+	}
+
+	emitErr = nil
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		emitErr = c.emit("transcodingComplete", transcodingCompleteEvent)
+		if emitErr == nil {
+			break // Success, exit retry loop
+		}
+		
+		c.logger.Error("failed to publish transcodingComplete event", 
+			zap.Error(emitErr), 
+			zap.Int("attempt", attempt),
+			zap.Int("maxRetries", maxRetries))
+		
+		if attempt < maxRetries {
+			// Wait before retry (exponential backoff)
+			time.Sleep(time.Duration(attempt) * time.Second)
+		}
+	}
+
+	if emitErr != nil {
+		c.logger.Error("failed to publish transcodingComplete event after all retries", 
 			zap.Error(emitErr), 
 			zap.String("videoId", req.VideoId))
 	}
@@ -184,6 +208,19 @@ func (c *Consumer) emit(topic string, payload interface{}) error {
     var publishingError error
     switch topic {
 		case "updateVideoStatus": {
+			publishingError = c.channel.Publish(
+    	        c.exchange, // exchange
+    	        topic,      // routing key
+    	        false,      // mandatory
+    	        false,      // immediate
+				amqp.Publishing{
+					ContentType: "application/json",
+					Body: body,
+				},
+			)
+			break
+		}
+		case "transcodingComplete": {
 			publishingError = c.channel.Publish(
     	        c.exchange, // exchange
     	        topic,      // routing key
