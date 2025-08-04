@@ -8,6 +8,7 @@ import (
 
 	"github.com/GoyalIshaan/vidSmith/tree/master/services/packager/processor"
 	"github.com/GoyalIshaan/vidSmith/tree/master/services/packager/types"
+	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/streadway/amqp"
 	"go.uber.org/zap"
@@ -21,21 +22,23 @@ type Consumer struct {
 	exchange string
 	logger  *zap.Logger
 	bucketName string
-	captionsPrefix string
-	transcriberJobPrefix string
+	rawDomain string
+	packagedPrefix string
 	s3Client *s3.S3
+	s3Session *session.Session
 }
 
 func NewConsumer(
 	channel *amqp.Channel, 
 	logger *zap.Logger,
-	bucketName, captionsPrefix, transcriberJobPrefix string,
+	bucketName, rawDomain, packagedPrefix string,
 	s3Client *s3.S3,
+	s3Session *session.Session,
 ) (*Consumer, error) {
-	queueName := "captionsRequest"
+	queueName := "packageRequest"
 	exchangeName := "newVideoUploaded"
 	exchangeType := "topic"
-	routingKey := "videoUploaded"
+	routingKey := "transcodingComplete"
 
 	// Declare the exchange (same as gateway)
 	if err := channel.ExchangeDeclare(
@@ -84,9 +87,10 @@ func NewConsumer(
 		exchange: exchangeName,
 		logger: logger,
 		bucketName: bucketName,
-		captionsPrefix: captionsPrefix,
-		transcriberJobPrefix: transcriberJobPrefix,
+		rawDomain: rawDomain,
+		packagedPrefix: packagedPrefix,
 		s3Client: s3Client,
+		s3Session: s3Session,
 		}, nil
 }
 
@@ -144,9 +148,9 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery) {
 		return
 	}
 
-	c.logger.Info("received captions request", zap.String("videoId", req.VideoId))
+	c.logger.Info("received packaging request", zap.String("videoId", req.VideoId))
 
-	err := processor.Process(ctx, req.VideoId, c.bucketName, c.s3Client, c.logger)
+	err := processor.Process(ctx, req.VideoId, c.bucketName, c.rawDomain, c.packagedPrefix, c.s3Client, c.s3Session, c.logger)
 	
 	if err != nil {
 		c.logger.Error("packaging failed", zap.Error(err), zap.String("videoId", req.VideoId))
@@ -156,8 +160,8 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery) {
 
 	d.Ack(false)
 
-	manifestKey := fmt.Sprintf("%s/%s/hls/master.m3u8", c.bucketName, c.captionsPrefix, req.VideoId)
-	dashKey := fmt.Sprintf("%s/%s/dash/manifest.mpd", c.bucketName, c.captionsPrefix, req.VideoId)
+	manifestKey := fmt.Sprintf("%s/%s/hls/master.m3u8", c.packagedPrefix, req.VideoId)
+	dashKey := fmt.Sprintf("%s/%s/dash/manifest.mpd", c.packagedPrefix, req.VideoId)
 
 	updateVideoStatusEvent := types.UpdateVideoStatusEvent{
 		VideoId: req.VideoId,

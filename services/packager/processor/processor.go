@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	"go.uber.org/zap"
 )
@@ -19,13 +21,13 @@ var renditions = []string{"1080p", "720p", "480p"}
 func Process(
   ctx context.Context,
   videoID, bucket, rawDomain, packagedPrefix string,
-  uploader *s3manager.Uploader,
+  s3Client *s3.S3,
+  sess *session.Session,
   logger *zap.Logger,
 ) error {
   logger = logger.With(zap.String("videoID", videoID))
   logger.Info("packaging start")
 
-  // 1) Build Shaka Packager args pointing at remote segments
   args := []string{}
   for _, res := range renditions {
     baseURL := fmt.Sprintf("https://%s/%s/%s", rawDomain, videoID, res)
@@ -35,7 +37,7 @@ func Process(
       fmt.Sprintf("in=%s/chunk-000.m4s,stream=video,init_segment=%s/chunk-000.m4s,segment_template=%s/chunk-$Number$.m4s", baseURL, baseURL, baseURL),
     )
   }
-  // output manifests locally
+
   hlsPath := filepath.Join(os.TempDir(), "hls-master.m3u8")
   mpdPath := filepath.Join(os.TempDir(), "dash-manifest.mpd")
   args = append(args,
@@ -43,7 +45,6 @@ func Process(
     "--mpd_output", mpdPath,
   )
 
-  // 2) Run packager
   logger.Info("running packager", zap.Strings("args", args))
   cmd := exec.CommandContext(ctx, "packager", args...)
   var stderr bytes.Buffer
@@ -52,7 +53,11 @@ func Process(
     return fmt.Errorf("packager failed: %w\n%s", err, stderr.String())
   }
 
-  // 3) Upload just the manifests to S3
+  uploader := s3manager.NewUploader(sess, func(u *s3manager.Uploader) {
+		u.PartSize = 10 * 1024 * 1024 // 10MB parts
+		u.Concurrency = 5
+	})
+
   upload := func(localPath, s3Subpath, contentType string) error {
     f, err := os.Open(localPath)
     if err != nil {
