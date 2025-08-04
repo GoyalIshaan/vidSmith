@@ -6,9 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/GoyalIshaan/vidSmith/services/transcoder/processor"
-	"github.com/GoyalIshaan/vidSmith/services/transcoder/types"
-	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/GoyalIshaan/vidSmith/tree/master/services/packager/processor"
+	"github.com/GoyalIshaan/vidSmith/tree/master/services/packager/types"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/streadway/amqp"
 	"go.uber.org/zap"
@@ -19,12 +18,21 @@ const prefetchCount = 5
 type Consumer struct {
 	channel *amqp.Channel
 	queue   string
-	logger  *zap.Logger
 	exchange string
+	logger  *zap.Logger
+	bucketName string
+	captionsPrefix string
+	transcriberJobPrefix string
+	s3Client *s3.S3
 }
 
-func NewConsumer(channel *amqp.Channel, logger *zap.Logger) (*Consumer, error) {
-	queueName := "transcodeRequest"
+func NewConsumer(
+	channel *amqp.Channel, 
+	logger *zap.Logger,
+	bucketName, captionsPrefix, transcriberJobPrefix string,
+	s3Client *s3.S3,
+) (*Consumer, error) {
+	queueName := "captionsRequest"
 	exchangeName := "newVideoUploaded"
 	exchangeType := "topic"
 	routingKey := "videoUploaded"
@@ -65,15 +73,24 @@ func NewConsumer(channel *amqp.Channel, logger *zap.Logger) (*Consumer, error) {
 		return nil, fmt.Errorf("queue bind: %w", err)
 	}
 
-	// Set prefetch count to 1 to ensure only one un-acked message is processed at a time
+	// sets the prefetch count
 	if err := channel.Qos(prefetchCount, 0, false); err != nil {
 		return nil, fmt.Errorf("qos set: %w", err)
 	}
 
-	return &Consumer{channel: channel, queue: queueName, logger: logger, exchange: exchangeName}, nil
+	return &Consumer{
+		channel: channel, 
+		queue: queueName, 
+		exchange: exchangeName,
+		logger: logger,
+		bucketName: bucketName,
+		captionsPrefix: captionsPrefix,
+		transcriberJobPrefix: transcriberJobPrefix,
+		s3Client: s3Client,
+		}, nil
 }
 
-func (c *Consumer) Consume(ctx context.Context, bucketName string, transcodedPrefix string, manifestPrefix string, s3Client *s3.S3, awsSession *session.Session) error {
+func (c *Consumer) Consume(ctx context.Context) error {
 	msgs, err := c.channel.Consume(
 		c.queue,
 		"",    // consumer tag
@@ -93,7 +110,7 @@ func (c *Consumer) Consume(ctx context.Context, bucketName string, transcodedPre
 
 	for {
 		select {
-		case <-ctx.Done():
+		case <- ctx.Done():
 			return nil
 		case d, ok := <-msgs:
 			if !ok {
@@ -105,13 +122,13 @@ func (c *Consumer) Consume(ctx context.Context, bucketName string, transcodedPre
 
 			go func(delivery amqp.Delivery) {
 				defer func() { <-semaphore }() // Release semaphore slot
-				c.handle(ctx, delivery, bucketName, transcodedPrefix, s3Client, awsSession)
+				c.handle(ctx, delivery)
 			}(d)
 		}
 	}
 }
 
-func (c *Consumer) handle(ctx context.Context, d amqp.Delivery, bucketName string, transcodedPrefix string, s3Client *s3.S3, awsSession *session.Session) {
+func (c *Consumer) handle(ctx context.Context, d amqp.Delivery) {	
 	defer func() {
 		// Recover from panic and nack the message
 		if r := recover(); r != nil {
@@ -119,41 +136,46 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery, bucketName strin
 			d.Nack(false, true)
 		}
 	}()
-
-	var req types.TranscodeRequest
+	
+	var req types.StartPackagingRequest
 	if err := json.Unmarshal(d.Body, &req); err != nil {
 		c.logger.Error("invalid message", zap.Error(err), zap.ByteString("body", d.Body))
-		d.Nack(false, false) // discard if bad message
+		d.Nack(false, false) // discard bad message
 		return
 	}
 
-	c.logger.Info("received transcode request", zap.String("videoId", req.VideoId), zap.String("s3Key", req.S3Key))
+	c.logger.Info("received captions request", zap.String("videoId", req.VideoId))
 
-	// Use the existing s3Client's session instead of creating a new one
-	// invoking the transcoding service
-
-	err := processor.Process(ctx, req, bucketName, transcodedPrefix, s3Client, awsSession, c.logger)
+	err := processor.Process(ctx, req.VideoId, c.bucketName, c.s3Client, c.logger)
+	
 	if err != nil {
-		c.logger.Error("transcoding failed", zap.Error(err))
-		d.Nack(false, true) // requeue for retry
+		c.logger.Error("packaging failed", zap.Error(err), zap.String("videoId", req.VideoId))
+		d.Nack(false, true)
 		return
 	}
 
 	d.Ack(false)
 
+	manifestKey := fmt.Sprintf("%s/%s/hls/master.m3u8", c.bucketName, c.captionsPrefix, req.VideoId)
+	dashKey := fmt.Sprintf("%s/%s/dash/manifest.mpd", c.bucketName, c.captionsPrefix, req.VideoId)
+
 	updateVideoStatusEvent := types.UpdateVideoStatusEvent{
 		VideoId: req.VideoId,
-		Phase: "transcode",
+		ManifestKey: manifestKey,
+		DashKey: dashKey,
+		Phase: "packaging",
 	}
+
 	maxRetries := 3
 	var emitErr error
+	
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		emitErr = c.emit("updateVideoStatus", updateVideoStatusEvent)
 		if emitErr == nil {
 			break // Success, exit retry loop
 		}
 		
-		c.logger.Error("failed to publish updateVideoStatus event", 
+		c.logger.Error("failed to publish packagingComplete event", 
 			zap.Error(emitErr), 
 			zap.Int("attempt", attempt),
 			zap.Int("maxRetries", maxRetries))
@@ -164,41 +186,13 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery, bucketName strin
 		}
 	}
 	
-	transcodingCompleteEvent := types.TranscodingCompleteEvent{
-		VideoId: req.VideoId,
-	}
-	
 	if emitErr != nil {
-		c.logger.Error("failed to publish updateVideoStatus event after all retries", 
+		c.logger.Error("failed to publish packagingComplete event after all retries", 
 			zap.Error(emitErr), 
 			zap.String("videoId", req.VideoId))
 	}
 
-	emitErr = nil
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		emitErr = c.emit("transcodingComplete", transcodingCompleteEvent)
-		if emitErr == nil {
-			break // Success, exit retry loop
-		}
-		
-		c.logger.Error("failed to publish transcodingComplete event", 
-			zap.Error(emitErr), 
-			zap.Int("attempt", attempt),
-			zap.Int("maxRetries", maxRetries))
-		
-		if attempt < maxRetries {
-			// Wait before retry (exponential backoff)
-			time.Sleep(time.Duration(attempt) * time.Second)
-		}
-	}
 
-	if emitErr != nil {
-		c.logger.Error("failed to publish transcodingComplete event after all retries", 
-			zap.Error(emitErr), 
-			zap.String("videoId", req.VideoId))
-	}
-
-	c.logger.Info("transcode request completed", zap.String("videoId", req.VideoId))
 }
 
 func (c *Consumer) emit(topic string, payload interface{}) error {
@@ -210,7 +204,7 @@ func (c *Consumer) emit(topic string, payload interface{}) error {
 
     var publishingError error
     switch topic {
-		case "updateVideoStatus": {
+		case "startCensor": {
 			publishingError = c.channel.Publish(
     	        c.exchange, // exchange
     	        topic,      // routing key
@@ -223,7 +217,7 @@ func (c *Consumer) emit(topic string, payload interface{}) error {
 			)
 			break
 		}
-		case "transcodingComplete": {
+		case "updateVideoStatus": {
 			publishingError = c.channel.Publish(
     	        c.exchange, // exchange
     	        topic,      // routing key
