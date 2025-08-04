@@ -37,7 +37,6 @@ func LoadConfig() (*Config, error) {
 	viper.SetDefault("FFMPEG_PATH", "ffmpeg")
 	viper.SetDefault("ORIGINAL_PREFIX", "uploads/originals")
 	viper.SetDefault("TRANSCODED_PREFIX", "transcoded")
-	viper.SetDefault("MANIFEST_PREFIX", "manifests")
 
 	// Required keys
 	required := []string{
@@ -56,7 +55,6 @@ func LoadConfig() (*Config, error) {
 		BucketName:   viper.GetString("BUCKET_NAME"),
 		OriginalPrefix: viper.GetString("ORIGINAL_PREFIX"),
 		TranscodedPrefix: viper.GetString("TRANSCODED_PREFIX"),
-		ManifestPrefix: viper.GetString("MANIFEST_PREFIX"),
 		AWSRegion:    viper.GetString("AWS_REGION"),
 		FfmpegPath:   viper.GetString("FFMPEG_PATH"),
 	}
