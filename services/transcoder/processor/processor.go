@@ -36,23 +36,13 @@ var renditions = []renditionSpec{
 	{Name: "480p", Scale: "854x480", CRF: "36"},
 }
 
-// downloadVideoFromS3 downloads the video file from S3 to a local temporary file
 func downloadVideoFromS3(
 	ctx context.Context,
-	s3Client *s3.S3,
+	downloader *s3manager.Downloader,
 	bucket, key, localPath string,
 	logger *zap.Logger,
 ) error {
 	logger.Info("downloading video from S3", zap.String("key", key), zap.String("localPath", localPath))
-
-	resp, err := s3Client.GetObjectWithContext(ctx, &s3.GetObjectInput{
-		Bucket: aws.String(bucket),
-		Key:    aws.String(key),
-	})
-	if err != nil {
-		return fmt.Errorf("get object from S3: %w", err)
-	}
-	defer resp.Body.Close()
 
 	file, err := os.Create(localPath)
 	if err != nil {
@@ -60,9 +50,16 @@ func downloadVideoFromS3(
 	}
 	defer file.Close()
 
-	_, err = io.Copy(file, resp.Body)
+	_, err = downloader.DownloadWithContext(ctx, file, &s3.GetObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	}, func(d *s3manager.Downloader) {
+		d.Concurrency = 10
+		d.PartSize = 10 * 1024 * 1024 // 10MB parts
+	})
+	
 	if err != nil {
-		return fmt.Errorf("copy S3 object to local file: %w", err)
+		return fmt.Errorf("get object from S3: %w", err)
 	}
 
 	logger.Info("video downloaded successfully", zap.String("localPath", localPath))
@@ -90,13 +87,13 @@ func Process(
 	
 	originalKey := fmt.Sprintf("%s/%s", "originals", request.S3Key)
 
-	// Download the video file to local temporary directory
+	downloader := s3manager.NewDownloader(sess)
+
 	localVideoPath := filepath.Join(stagingDir, "original_video")
-	if err := downloadVideoFromS3(ctx, s3Client, bucketName, originalKey, localVideoPath, logger); err != nil {
+	if err := downloadVideoFromS3(ctx, downloader, bucketName, originalKey, localVideoPath, logger); err != nil {
 		return fmt.Errorf("download video from S3: %w", err)
 	}
 	
-	// Ensure the local video file is cleaned up when done
 	defer func() {
 		if err := os.Remove(localVideoPath); err != nil && !os.IsNotExist(err) {
 			logger.Warn("failed to remove local video file", zap.String("path", localVideoPath), zap.Error(err))
@@ -108,7 +105,6 @@ func Process(
 		u.Concurrency = 5
 	})
 
-	// Transcode for each rendition using the downloaded local file.
 	for _, r := range renditions {
 		if err := processSingleRendition(ctx, uploader, bucketName, localVideoPath, transcodedPrefix, request.VideoId, r, stagingDir, logger); err != nil {
 			return fmt.Errorf("rendition %s: %w", r.Name, err)
@@ -175,7 +171,7 @@ func detectNewChunk(
 ) {
 	for scanner.Scan() {
 		fileName := scanner.Text() // FFmpeg outputs just the filename
-		fullPath := filepath.Join(renditionDir, fileName) // Construct full path
+		fullPath := filepath.Join(renditionDir, fileName)
 		s3Key := filepath.Join(transcodedPrefix, videoID, renditionName, fileName)
 		
 		wg.Add(1)
