@@ -12,6 +12,8 @@
   },
   "dependencies": {
     "@apollo/client": "^3.9.5",
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/util": "^0.12.2",
     "@tailwindcss/vite": "^4.1.11",
     "@types/react-router-dom": "^5.3.3",
     "graphql": "^16.8.1",

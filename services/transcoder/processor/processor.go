@@ -36,6 +36,39 @@ var renditions = []renditionSpec{
 	{Name: "480p", Scale: "854x480", CRF: "36"},
 }
 
+// downloadVideoFromS3 downloads the video file from S3 to a local temporary file
+func downloadVideoFromS3(
+	ctx context.Context,
+	s3Client *s3.S3,
+	bucket, key, localPath string,
+	logger *zap.Logger,
+) error {
+	logger.Info("downloading video from S3", zap.String("key", key), zap.String("localPath", localPath))
+
+	resp, err := s3Client.GetObjectWithContext(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return fmt.Errorf("get object from S3: %w", err)
+	}
+	defer resp.Body.Close()
+
+	file, err := os.Create(localPath)
+	if err != nil {
+		return fmt.Errorf("create local file: %w", err)
+	}
+	defer file.Close()
+
+	_, err = io.Copy(file, resp.Body)
+	if err != nil {
+		return fmt.Errorf("copy S3 object to local file: %w", err)
+	}
+
+	logger.Info("video downloaded successfully", zap.String("localPath", localPath))
+	return nil
+}
+
 // Process handles the entire transcoding workflow for a video request.
 func Process(
 	ctx context.Context,
@@ -57,6 +90,19 @@ func Process(
 	
 	originalKey := fmt.Sprintf("%s/%s", "originals", request.S3Key)
 
+	// Download the video file to local temporary directory
+	localVideoPath := filepath.Join(stagingDir, "original_video")
+	if err := downloadVideoFromS3(ctx, s3Client, bucketName, originalKey, localVideoPath, logger); err != nil {
+		return fmt.Errorf("download video from S3: %w", err)
+	}
+	
+	// Ensure the local video file is cleaned up when done
+	defer func() {
+		if err := os.Remove(localVideoPath); err != nil && !os.IsNotExist(err) {
+			logger.Warn("failed to remove local video file", zap.String("path", localVideoPath), zap.Error(err))
+		}
+	}()
+
 	uploader := s3manager.NewUploader(sess, func(u *s3manager.Uploader) {
 		u.PartSize = 10 * 1024 * 1024 // 10MB parts
 		u.Concurrency = 5
@@ -64,7 +110,7 @@ func Process(
 
 	// Transcode for each rendition using the downloaded local file.
 	for _, r := range renditions {
-		if err := processSingleRendition(ctx, s3Client, uploader, bucketName, originalKey, transcodedPrefix, request.VideoId, r, stagingDir, logger); err != nil {
+		if err := processSingleRendition(ctx, uploader, bucketName, localVideoPath, transcodedPrefix, request.VideoId, r, stagingDir, logger); err != nil {
 			return fmt.Errorf("rendition %s: %w", r.Name, err)
 		}
 	}
@@ -74,9 +120,8 @@ func Process(
 
 func processSingleRendition(
 	ctx context.Context,
-  	s3Client *s3.S3,
   	uploader *s3manager.Uploader,
-	bucket, originalKey, transcodedPrefix, videoID string,
+	bucket, localVideoPath, transcodedPrefix, videoID string,
 	r renditionSpec,
 	stagingBase string,
   	logger *zap.Logger,
@@ -90,27 +135,9 @@ func processSingleRendition(
 
 	defer os.RemoveAll(reditionDirKey)
 
-	prIn, pwIn := io.Pipe()
 	prList, pwList := io.Pipe()
 
-	go func() {
-		defer pwIn.Close()
-		resp, err := s3Client.GetObjectWithContext(ctx, &s3.GetObjectInput{
-			Bucket: aws.String(bucket),
-			Key:    aws.String(originalKey),
-		})
-		if err != nil {
-			pwIn.CloseWithError(err)
-			return
-		}
-		
-		defer resp.Body.Close()
-		io.Copy(pwIn, resp.Body)
-	}()
-
-
-	ffmpegCommand := exec.CommandContext(ctx, "ffmpeg", argBuilder(r, reditionDirKey)...)
-	ffmpegCommand.Stdin = prIn
+	ffmpegCommand := exec.CommandContext(ctx, "ffmpeg", argBuilder(r, reditionDirKey, localVideoPath)...)
 	ffmpegCommand.Stdout = pwList
 
 	var stderrBuf bytes.Buffer
@@ -123,7 +150,7 @@ func processSingleRendition(
 	var wg sync.WaitGroup
 	scanner := bufio.NewScanner(prList)
 
-	go detectNewChunk(scanner, &wg, transcodedPrefix, videoID, r.Name, log, uploader, bucket, ctx)
+	go detectNewChunk(scanner, &wg, transcodedPrefix, videoID, r.Name, reditionDirKey, log, uploader, bucket, ctx)
 
 	if err := ffmpegCommand.Wait(); err != nil {
 		return fmt.Errorf("ffmpeg (%s) failed: %w\n%s", r.Name, err, stderrBuf.String())
@@ -140,19 +167,19 @@ func processSingleRendition(
 func detectNewChunk(
 	scanner *bufio.Scanner, 
 	wg *sync.WaitGroup, 
-	transcodedPrefix, videoID, renditionName string,
+	transcodedPrefix, videoID, renditionName, renditionDir string,
 	log *zap.Logger,
 	uploader *s3manager.Uploader,
 	bucket string,
 	ctx context.Context,
 ) {
 	for scanner.Scan() {
-		localPath := scanner.Text()
-		fileName := filepath.Base(localPath)
+		fileName := scanner.Text() // FFmpeg outputs just the filename
+		fullPath := filepath.Join(renditionDir, fileName) // Construct full path
 		s3Key := filepath.Join(transcodedPrefix, videoID, renditionName, fileName)
 		
 		wg.Add(1)
-		go uploadChunk(uploader, bucket, s3Key, localPath, log, wg, ctx)
+		go uploadChunk(uploader, bucket, s3Key, fullPath, log, wg, ctx)
 	}
 	if err := scanner.Err(); err != nil {
 		log.Error("scan failed", zap.Error(err))
@@ -195,14 +222,14 @@ func uploadChunk(
 	log.Info("uploaded", zap.String("key", s3Key))
 }
 
-func argBuilder(r renditionSpec, segDir string) []string {
+func argBuilder(r renditionSpec, segDir, inputVideoPath string) []string {
     return []string{
         // 1) Minimal logging
         "-hide_banner",
         "-loglevel", "warning",
 
-        // 2) Read from stdin
-        "-i", "pipe:0",
+        // 2) Read from local file
+        "-i", inputVideoPath,
 
         // 3) Explicit stream mapping
         "-map", "0:v:0",    // video only from first input stream
@@ -228,7 +255,7 @@ func argBuilder(r renditionSpec, segDir string) []string {
         "-f", "segment",
         "-segment_time", "4",            // ~4s chunks
         "-segment_format", "mp4",        // fMP4 (CMAF) container
-        "-reset_timestamps", "1",        // each segment’s timestamps start at 0
+        "-reset_timestamps", "1",        // each segment's timestamps start at 0
 
         // 9) Tell ffmpeg to list each filename to stdout as soon as it's closed
         "-segment_list", "pipe:1",

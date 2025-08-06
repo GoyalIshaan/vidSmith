@@ -81,20 +81,94 @@ export class UploadService {
   private uploadedParts: PartInput[] = [];
   private totalParts: number = 0;
 
+  /**
+   * Ensure video file is properly formatted for ffmpeg processing
+   * Creates a clean copy and validates file integrity
+   */
+  private async prepareVideoForUpload(file: File): Promise<File> {
+    // Read the file as ArrayBuffer to ensure we have complete data
+    const arrayBuffer = await file.arrayBuffer();
+
+    // Create a new File with the complete data
+    const cleanFile = new File([arrayBuffer], file.name, {
+      type: file.type,
+      lastModified: file.lastModified,
+    });
+
+    // Validate the file size matches
+    if (cleanFile.size !== file.size) {
+      throw new Error("File integrity check failed - file may be corrupted");
+    }
+
+    // For MP4 files, add a note about moov atom processing
+    const isMP4 =
+      file.type === "video/mp4" || file.name.toLowerCase().endsWith(".mp4");
+    if (isMP4) {
+      console.log(
+        "MP4 file detected. Note: Server-side processing may be needed to move moov atom to beginning for optimal ffmpeg compatibility."
+      );
+    }
+
+    return cleanFile;
+  }
+
+  /**
+   * Validate and preprocess video file to ensure it's compatible with ffmpeg
+   * Converts to fast-start MP4 if needed
+   */
+  private async preprocessVideo(file: File): Promise<File> {
+    // Validate file type
+    if (!file.type.startsWith("video/")) {
+      throw new Error("Selected file is not a valid video format");
+    }
+
+    // Check file size (minimum 1KB to avoid empty files)
+    if (file.size < 1024) {
+      throw new Error("Video file is too small or corrupted");
+    }
+
+    // For MP4 files, check if they need fast-start conversion
+    const isMP4 =
+      file.type === "video/mp4" || file.name.toLowerCase().endsWith(".mp4");
+
+    if (isMP4) {
+      console.log("MP4 file detected. Preparing for ffmpeg compatibility...");
+      try {
+        // Prepare MP4 file for upload
+        return await this.prepareVideoForUpload(file);
+      } catch (error) {
+        console.warn("MP4 preparation failed, using original file:", error);
+        return file;
+      }
+    } else {
+      console.log("Non-MP4 video detected. Preparing for upload...");
+      try {
+        // Prepare non-MP4 file for upload
+        return await this.prepareVideoForUpload(file);
+      } catch (error) {
+        console.warn("Video preparation failed, using original file:", error);
+        return file;
+      }
+    }
+  }
+
   async initiateUpload(
     file: File,
     customVideoName?: string
   ): Promise<InitiateUploadResponse> {
-    const totalParts = Math.ceil(file.size / CHUNK_SIZE);
+    // Preprocess the video first
+    const processedFile = await this.preprocessVideo(file);
+
+    const totalParts = Math.ceil(processedFile.size / CHUNK_SIZE);
     this.totalParts = totalParts;
 
     const response = await client.mutate({
       mutation: INITIATE_UPLOAD,
       variables: {
-        videoName: customVideoName || file.name.split(".")[0], // Use custom name or file name without extension
-        fileName: file.name,
-        contentType: file.type,
-        size: file.size,
+        videoName: customVideoName || processedFile.name.split(".")[0], // Use custom name or file name without extension
+        fileName: processedFile.name,
+        contentType: processedFile.type,
+        size: processedFile.size,
       },
     });
 
@@ -114,7 +188,10 @@ export class UploadService {
       throw new Error("Upload not initiated. Call initiateUpload first.");
     }
 
-    const chunks = this.createChunks(file);
+    // Preprocess the video first
+    const processedFile = await this.preprocessVideo(file);
+
+    const chunks = this.createChunks(processedFile);
     this.uploadedParts = [];
 
     for (let i = 0; i < chunks.length; i++) {

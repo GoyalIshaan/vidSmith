@@ -33,6 +33,18 @@ const VideoUpload: React.FC = () => {
     const videoFile = files.find((file) => file.type.startsWith("video/"));
 
     if (videoFile) {
+      // Additional validation for video files
+      if (videoFile.size < 1024) {
+        setError("Video file is too small or corrupted");
+        return;
+      }
+      
+      // Check for common video formats
+      const validFormats = ['video/mp4', 'video/mov', 'video/avi', 'video/webm', 'video/mkv'];
+      if (!validFormats.includes(videoFile.type)) {
+        console.warn(`Video format ${videoFile.type} may not be fully compatible with ffmpeg processing`);
+      }
+      
       setSelectedFile(videoFile);
       setVideoTitle(videoFile.name.split(".").slice(0, -1).join("."));
       setError("");
@@ -45,6 +57,26 @@ const VideoUpload: React.FC = () => {
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (file && file.type.startsWith("video/")) {
+        // Additional validation for video files
+        if (file.size < 1024) {
+          setError("Video file is too small or corrupted");
+          return;
+        }
+
+        // Check for common video formats
+        const validFormats = [
+          "video/mp4",
+          "video/mov",
+          "video/avi",
+          "video/webm",
+          "video/mkv",
+        ];
+        if (!validFormats.includes(file.type)) {
+          console.warn(
+            `Video format ${file.type} may not be fully compatible with ffmpeg processing`
+          );
+        }
+
         setSelectedFile(file);
         setVideoTitle(file.name.split(".").slice(0, -1).join("."));
         setError("");
@@ -68,13 +100,14 @@ const VideoUpload: React.FC = () => {
 
     try {
       setError("");
-      setUploadStatus("Initializing upload...");
+      setUploadStatus("Validating video file...");
       setIsUploading(true);
       setUploadProgress(null);
 
       const uploadService = uploadServiceRef.current;
 
       // Initiate the upload with the custom video title
+      setUploadStatus("Preparing video for upload...");
       await uploadService.initiateUpload(selectedFile, videoTitle.trim());
       setUploadStatus("Uploading video...");
 
