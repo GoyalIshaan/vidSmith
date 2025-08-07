@@ -22,7 +22,7 @@ type Consumer struct {
 	exchange string
 	logger  *zap.Logger
 	bucketName string
-	rawDomain string
+	transcodedPrefix string
 	packagedPrefix string
 	s3Client *s3.S3
 	s3Session *session.Session
@@ -31,7 +31,7 @@ type Consumer struct {
 func NewConsumer(
 	channel *amqp.Channel, 
 	logger *zap.Logger,
-	bucketName, rawDomain, packagedPrefix string,
+	bucketName, transcodedPrefix, packagedPrefix string,
 	s3Client *s3.S3,
 	s3Session *session.Session,
 ) (*Consumer, error) {
@@ -87,7 +87,7 @@ func NewConsumer(
 		exchange: exchangeName,
 		logger: logger,
 		bucketName: bucketName,
-		rawDomain: rawDomain,
+		transcodedPrefix: transcodedPrefix,
 		packagedPrefix: packagedPrefix,
 		s3Client: s3Client,
 		s3Session: s3Session,
@@ -150,7 +150,7 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery) {
 
 	c.logger.Info("received packaging request", zap.String("videoId", req.VideoId))
 
-	err := processor.Process(ctx, req.VideoId, c.bucketName, c.rawDomain, c.packagedPrefix, c.s3Client, c.s3Session, c.logger)
+	err := processor.Process(ctx, req.VideoId, c.bucketName, c.transcodedPrefix, c.packagedPrefix, c.s3Client, c.s3Session, c.logger)
 	
 	if err != nil {
 		c.logger.Error("packaging failed", zap.Error(err), zap.String("videoId", req.VideoId))

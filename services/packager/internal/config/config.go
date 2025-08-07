@@ -11,7 +11,7 @@ type Config struct {
 	AmqpURL     string
 	BucketName string
 	AWSRegion   string
-	RawDomain   string
+	TranscodedPrefix   string
 	PackagedPrefix string
 }
 
@@ -25,7 +25,7 @@ func LoadConfig() (*Config, error) {
 		"AMQP_URL",
 		"BUCKET_NAME",
 		"AWS_REGION",
-		"RAW_DOMAIN",
+		"TRANSCODED_PREFIX",
 		"PACKAGED_PREFIX",
 	}
 
@@ -39,7 +39,7 @@ func LoadConfig() (*Config, error) {
 		AmqpURL:      viper.GetString("AMQP_URL"),
 		BucketName:   viper.GetString("BUCKET_NAME"),
 		AWSRegion:    viper.GetString("AWS_REGION"),
-		RawDomain:    viper.GetString("RAW_DOMAIN"),
+		TranscodedPrefix:    viper.GetString("TRANSCODED_PREFIX"),
 		PackagedPrefix: viper.GetString("PACKAGED_PREFIX"),
 	}
 	return cfg, nil
