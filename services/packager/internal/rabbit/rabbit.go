@@ -210,19 +210,6 @@ func (c *Consumer) emit(topic string, payload interface{}) error {
 
     var publishingError error
     switch topic {
-		case "startCensor": {
-			publishingError = c.channel.Publish(
-    	        c.exchange, // exchange
-    	        topic,      // routing key
-    	        false,      // mandatory
-    	        false,      // immediate
-				amqp.Publishing{
-					ContentType: "application/json",
-					Body: body,
-				},
-			)
-			break
-		}
 		case "updateVideoStatus": {
 			publishingError = c.channel.Publish(
     	        c.exchange, // exchange

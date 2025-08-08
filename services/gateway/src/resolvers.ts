@@ -17,6 +17,7 @@ export const resolvers: Resolvers = {
           s3Key: video.s3Key,
           bucketName: video.bucketName,
           captionsKey: video.captionsKey,
+          manifestKey: video.manifestKey,
           createdAt: video.createdAt.toISOString(),
         }));
       } catch (error) {
@@ -41,6 +42,7 @@ export const resolvers: Resolvers = {
           s3Key: video.s3Key,
           bucketName: video.bucketName,
           captionsKey: video.captionsKey,
+          manifestKey: video.manifestKey,
           createdAt: video.createdAt.toISOString(),
         };
       } catch (error) {
@@ -147,6 +149,7 @@ export const resolvers: Resolvers = {
     s3Key: (parent) => parent.s3Key,
     bucketName: (parent) => parent.bucketName,
     captionsKey: (parent) => parent.captionsKey,
+    manifestKey: (parent) => parent.manifestKey,
     createdAt: (parent) => parent.createdAt,
   },
 

@@ -143,10 +143,10 @@ func buildRenditionPlaylist(
 	fmt.Fprintln(&b, "#EXT-X-INDEPENDENT-SEGMENTS")
 	fmt.Fprintln(&b, "#EXT-X-TARGETDURATION:4")
 	fmt.Fprintln(&b, "#EXT-X-MEDIA-SEQUENCE:0")
-	for _, k :=range keys {
+	for _, pathKey :=range keys {
 		fmt.Fprintln(&b, "#EXTINF:4.000,")
-		pathWithoutBucket := strings.TrimPrefix(k, bucket+"/")
-		fmt.Fprintf(&b, "%s/%s\n", cdnBaseURL, pathWithoutBucket)
+		// Use relative path from /manifests/{videoId}/hls/ to /transcoded/{videoId}/{rendition}/
+		fmt.Fprintf(&b, "../../../%s\n", pathKey)
 	}
 	fmt.Fprintln(&b, "#EXT-X-ENDLIST")
 
@@ -160,7 +160,7 @@ func buildMasterPlaylist(rends []renditionSpec, cdnBaseURL, packagedPrefix, vide
 	fmt.Fprintln(&b, "#EXT-X-INDEPENDENT-SEGMENTS")
 	for _, r := range rends {
 		fmt.Fprintf(&b, "#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%s\n", r.Bandwidth, r.Resolution)
-		fmt.Fprintf(&b, "%s/%s/%s/hls/%s.m3u8\n", cdnBaseURL, packagedPrefix, videoID, r.Name)
+		fmt.Fprintf(&b, "%s.m3u8\n", r.Name)
 	}
 	return b.Bytes(), nil
 }
@@ -181,8 +181,14 @@ func buildMPD(videoID, transcodedPrefix string, segments map[string][]string, cd
 		fmt.Fprintf(&b, `<AdaptationSet mimeType="video/mp4" segmentAlignment="true" startWithSAP="1">`+"\n")
 		fmt.Fprintf(&b, `<Representation id="%s" bandwidth="%d" width="%s" height="%s" codecs="avc1.4d401f,mp4a.40.2">`+"\n",
 			r.Name, r.Bandwidth, strings.Split(r.Resolution, "x")[0], strings.Split(r.Resolution, "x")[1])
-		fmt.Fprintf(&b, `<BaseURL>%s/%s/%s/%s/</BaseURL>`+"\n", cdnBaseURL, transcodedPrefix, videoID, r.Name)
-		fmt.Fprintf(&b, `<SegmentTemplate media="chunk-$Number$.m4s" startNumber="0" duration="4" timescale="1"/>`+"\n")
+		
+		// Use SegmentList with explicit URLs instead of SegmentTemplate
+		fmt.Fprintln(&b, `<SegmentList duration="4" timescale="1">`)
+		for _, segmentKey := range keys {
+			fmt.Fprintf(&b, `<SegmentURL media="%s/%s"/>`+"\n", cdnBaseURL, segmentKey)
+		}
+		fmt.Fprintln(&b, `</SegmentList>`)
+		
 		fmt.Fprintln(&b, `</Representation>`)
 		fmt.Fprintln(&b, `</AdaptationSet>`)
 	}
@@ -192,7 +198,7 @@ func buildMPD(videoID, transcodedPrefix string, segments map[string][]string, cd
 	return b.Bytes(), nil
 }
 
-var chunkNumRe = regexp.MustCompile(`chunk-(\d+)\.m4s$`)
+var chunkNumRe = regexp.MustCompile(`chunk-(\d{3})\.m4s$`)
 
 func sortByChunkNumber(keys []string) {
 	sort.Slice(keys, func(i, j int) bool {

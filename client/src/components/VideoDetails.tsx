@@ -4,6 +4,7 @@ import { gql } from "@apollo/client";
 import { useParams, useNavigate } from "react-router-dom";
 import type { Video } from "../types/graphql";
 import VideoPipeline from "./VideoPipeline";
+import VideoPlayer from "./VideoPlayer";
 
 const GET_VIDEO = gql`
   query GetVideo($id: ID!) {
@@ -217,12 +218,26 @@ const VideoDetails: React.FC = () => {
           </div>
         </div>
 
-        {/* Play Button */}
-        {video.status === 6 && video.s3Key && (
+        {/* Video Player */}
+        {video.status >= 2 && (
           <div className="mt-6 pt-6 border-t border-black">
-            <button className="w-full bg-red-500 hover:bg-black text-white py-3 px-6 rounded-lg text-lg font-semibold transition-all duration-300 transform hover:-translate-y-0.5 shadow-lg flex items-center justify-center gap-3">
-              ▶️ Play Video
-            </button>
+            <div className="mb-4">
+              <h3 className="text-lg font-semibold text-black mb-2">
+                Video Player
+              </h3>
+              <p className="text-sm text-gray-600">
+                {video.status >= 6
+                  ? "Adaptive bitrate streaming with automatic quality selection"
+                  : "Video available for playback (processing may still be ongoing)"}
+              </p>
+            </div>
+            <VideoPlayer
+              videoId={video.id}
+              className="w-full"
+              onReady={() => {
+                console.log("Video player ready for video:", video.videoName);
+              }}
+            />
           </div>
         )}
       </div>

@@ -10,6 +10,7 @@ type Video {
   s3Key: String # S3 URL for HLS/DASH manifest (set when transcoding completes)
   bucketName: String # S3 bucket name
   captionsKey: String # S3 URL for WebVTT captions (set when captioning completes)
+  manifestKey: String # HLS manifest path for streaming
   createdAt: String! # Creation timestamp
 }
 

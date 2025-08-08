@@ -220,44 +220,37 @@ func uploadChunk(
 
 func argBuilder(r renditionSpec, segDir, inputVideoPath string) []string {
     return []string{
-        // 1) Minimal logging
-        "-hide_banner",
-        "-loglevel", "warning",
-
-        // 2) Read from local file
+        "-hide_banner", "-loglevel", "warning",
         "-i", inputVideoPath,
 
-        // 3) Explicit stream mapping
-        "-map", "0:v:0",    // video only from first input stream
-        "-map", "0:a:0?",   // audio from first stream if present
+        // streams
+        "-map", "0:v:0",
+        "-map", "0:a:0?",
 
-        // 4) Resize
+        // scale
         "-vf", "scale=" + r.Scale,
 
-        // 5) Video encode: CRF-based quality mode
-        "-c:v", "libx264",
-        "-preset", "medium",        // tune encode speed vs. quality
-        "-crf", r.CRF,              // constant‐quality target
-        "-b:v", "0",                // disable bitrate ceiling in CRF mode
+        // video encode
+        "-c:v", "libx264", "-preset", "medium", "-crf", r.CRF, "-b:v", "0",
+        // align keyframes to 4s segments
+        "-sc_threshold", "0",
+        "-force_key_frames", "expr:gte(t,n_forced*4)",
 
-        // 6) Audio encode
-        "-c:a", "aac",
-        "-b:a", "128k",
+        // audio encode
+        "-c:a", "aac", "-b:a", "128k",
 
-        // 7) Fragmented MP4 settings
-        "-movflags", "frag_keyframe+empty_moov",
+        // DASH muxer (NOT the segment muxer)
+        "-f", "dash",
+        "-seg_duration", "4",
+        "-use_template", "1",
+        "-use_timeline", "0",
+        "-init_seg_name", "init.mp4",
+        "-media_seg_name", "chunk-$Number%03d$.m4s",
+        "-single_file", "0",
+        "-remove_at_exit", "0",
 
-        // 8) Segmenter muxer
-        "-f", "segment",
-        "-segment_time", "4",            // ~4s chunks
-        "-segment_format", "mp4",        // fMP4 (CMAF) container
-        "-reset_timestamps", "1",        // each segment's timestamps start at 0
-
-        // 9) Tell ffmpeg to list each filename to stdout as soon as it's closed
-        "-segment_list", "pipe:1",
-        "-segment_list_type", "flat",
-
-        // 10) Pattern for the actual chunk files
-        filepath.Join(segDir, "chunk-%03d.m4s"),
+        // output MPD path (segments land in segDir)
+        filepath.Join(segDir, "ignored.mpd"),
     }
 }
+

@@ -12,6 +12,10 @@ const VideoPipeline: React.FC<VideoPipelineProps> = ({ status, videoName }) => {
         return status >= 0 ? "completed" : "pending";
       case "transcoding":
         return status >= 1 ? "completed" : status === 0 ? "active" : "pending";
+      case "packaging":
+        // Packaging happens right after transcoding completes. We treat it as active when status === 1
+        // and completed once captioning has moved the status forward (>= 2)
+        return status >= 2 ? "completed" : status === 1 ? "active" : "pending";
       case "captioning":
         return status >= 2 ? "completed" : status === 1 ? "active" : "pending";
       case "censoring":
@@ -37,6 +41,12 @@ const VideoPipeline: React.FC<VideoPipelineProps> = ({ status, videoName }) => {
           ? "✅"
           : phaseStatus === "active"
           ? "🔄"
+          : "⏳";
+      case "packaging":
+        return phaseStatus === "completed"
+          ? "✅"
+          : phaseStatus === "active"
+          ? "📦"
           : "⏳";
       case "captioning":
         return phaseStatus === "completed"
@@ -74,13 +84,7 @@ const VideoPipeline: React.FC<VideoPipelineProps> = ({ status, videoName }) => {
     }
   };
 
-  const getConnectorClasses = (fromPhase: string) => {
-    const fromStatus = getPhaseStatus(fromPhase);
-    return fromStatus === "completed"
-      ? "w-8 h-0.5 bg-green-500"
-      : "w-8 h-0.5 bg-gray-300";
-  };
-
+  // All phases in one horizontal line
   const phases = [
     { key: "upload", label: "Upload", description: "File uploaded" },
     {
@@ -93,6 +97,11 @@ const VideoPipeline: React.FC<VideoPipelineProps> = ({ status, videoName }) => {
       label: "Captioning",
       description: "Generating subtitles",
     },
+    {
+      key: "packaging",
+      label: "Packaging",
+      description: "Preparing manifests",
+    },
     { key: "censoring", label: "Censoring", description: "Content review" },
     { key: "done", label: "Done", description: "Ready to play" },
   ];
@@ -103,6 +112,7 @@ const VideoPipeline: React.FC<VideoPipelineProps> = ({ status, videoName }) => {
         🚀 Processing Pipeline: {videoName}
       </h4>
 
+      {/* All phases in one horizontal line */}
       <div className="flex items-center justify-between">
         {phases.map((phase, index) => (
           <React.Fragment key={phase.key}>
@@ -115,7 +125,7 @@ const VideoPipeline: React.FC<VideoPipelineProps> = ({ status, videoName }) => {
             </div>
 
             {index < phases.length - 1 && (
-              <div className={getConnectorClasses(phase.key)}></div>
+              <div className="w-8 h-0.5 bg-gray-300"></div>
             )}
           </React.Fragment>
         ))}
@@ -133,7 +143,7 @@ const VideoPipeline: React.FC<VideoPipelineProps> = ({ status, videoName }) => {
             : status === 2
             ? "Captioning Done"
             : status === 1
-            ? "Transcoding Done"
+            ? "Packaging"
             : status === 0
             ? "Uploaded"
             : "Error"}

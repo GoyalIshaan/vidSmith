@@ -14,3 +14,8 @@ export interface captionsUpdateMessage extends serverUpdateMessage {
 export interface transcoderUpdateMessage extends serverUpdateMessage {
   ManifestKey: string;
 }
+
+export interface packagingUpdateMessage extends serverUpdateMessage {
+  ManifestKey: string;
+  DashKey: string;
+}

@@ -2,6 +2,7 @@ import type {
   censorUpdateMessage,
   captionsUpdateMessage,
   transcoderUpdateMessage,
+  packagingUpdateMessage,
 } from "../types/rabbit";
 import { DB } from "../db/dbSetup";
 import { videosTable } from "../db/schema";
@@ -59,5 +60,31 @@ export async function transcoderMessageHandler(
     .where(eq(videosTable.id, message.VideoId))
     .returning();
 
+  return result[0];
+}
+
+export async function packagingMessageHandler(message: packagingUpdateMessage) {
+  console.log(
+    "Processing packaging message:",
+    JSON.stringify(message, null, 2)
+  );
+
+  const updateData: any = {
+    status: sql`${videosTable.status} + 1`,
+    updatedAt: new Date(),
+  };
+
+  // Set both manifest keys if provided
+  if (message.ManifestKey && message.ManifestKey.trim() !== "") {
+    updateData.manifestKey = message.ManifestKey;
+    console.log("Setting manifest key:", message.ManifestKey);
+  }
+
+  const result = await DB.update(videosTable)
+    .set(updateData)
+    .where(eq(videosTable.id, message.VideoId))
+    .returning();
+
+  console.log("Packaging handler result:", result[0]);
   return result[0];
 }
