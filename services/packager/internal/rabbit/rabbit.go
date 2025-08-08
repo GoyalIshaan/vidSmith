@@ -24,6 +24,7 @@ type Consumer struct {
 	bucketName string
 	transcodedPrefix string
 	packagedPrefix string
+	cdnBaseURL string
 	s3Client *s3.S3
 	s3Session *session.Session
 }
@@ -31,7 +32,7 @@ type Consumer struct {
 func NewConsumer(
 	channel *amqp.Channel, 
 	logger *zap.Logger,
-	bucketName, transcodedPrefix, packagedPrefix string,
+	bucketName, transcodedPrefix, packagedPrefix, cdnBaseURL string,
 	s3Client *s3.S3,
 	s3Session *session.Session,
 ) (*Consumer, error) {
@@ -89,6 +90,7 @@ func NewConsumer(
 		bucketName: bucketName,
 		transcodedPrefix: transcodedPrefix,
 		packagedPrefix: packagedPrefix,
+		cdnBaseURL: cdnBaseURL,
 		s3Client: s3Client,
 		s3Session: s3Session,
 		}, nil
@@ -150,7 +152,7 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery) {
 
 	c.logger.Info("received packaging request", zap.String("videoId", req.VideoId))
 
-	err := processor.Process(ctx, req.VideoId, c.bucketName, c.transcodedPrefix, c.packagedPrefix, c.s3Client, c.s3Session, c.logger)
+	err := processor.Process(ctx, req.VideoId, c.bucketName, c.transcodedPrefix, c.packagedPrefix, c.cdnBaseURL, c.s3Client, c.s3Session, c.logger)
 	
 	if err != nil {
 		c.logger.Error("packaging failed", zap.Error(err), zap.String("videoId", req.VideoId))
@@ -161,7 +163,7 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery) {
 	d.Ack(false)
 
 	manifestKey := fmt.Sprintf("%s/%s/hls/master.m3u8", c.packagedPrefix, req.VideoId)
-	dashKey := fmt.Sprintf("%s/%s/dash/manifest.mpd", c.packagedPrefix, req.VideoId)
+	dashKey := fmt.Sprintf("%s/%s/dash/master.mpd", c.packagedPrefix, req.VideoId)
 
 	updateVideoStatusEvent := types.UpdateVideoStatusEvent{
 		VideoId: req.VideoId,

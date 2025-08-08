@@ -35,6 +35,7 @@ func Process(
 	bucket string,
 	transcodedPrefix string,
 	packagedPrefix string,
+	cdnBaseURL string,
 	s3Client *s3.S3,
 	sess *session.Session,
 	logger *zap.Logger,
@@ -47,41 +48,58 @@ func Process(
 		u.Concurrency = 5
 	})
 
-	// store segment lists for DASH generation
 	renditionSegments := make(map[string][]string)
 
-	// 1) Build per-rendition HLS playlists + collect segment lists
 	for _, r := range renditions {
-		keys, plBytes, err := buildRenditionPlaylist(ctx, s3Client, bucket, transcodedPrefix, videoID, r)
+		keys, plBytes, err := buildRenditionPlaylist(ctx, s3Client, bucket, transcodedPrefix, videoID, r, cdnBaseURL)
 		if err != nil {
 			return fmt.Errorf("rendition %s: %w", r.Name, err)
 		}
+    
 		renditionSegments[r.Name] = keys
 		hlsKey := filepath.ToSlash(filepath.Join(packagedPrefix, videoID, "hls", r.Name+".m3u8"))
-		if err := putString(ctx, uploader, bucket, hlsKey, "application/vnd.apple.mpegurl", "public, max-age=3600", plBytes); err != nil {
+		if _, err := uploader.UploadWithContext(ctx, &s3manager.UploadInput{
+      Bucket:       aws.String(bucket),
+      Key:          aws.String(hlsKey),
+      Body:         bytes.NewReader(plBytes),
+      ContentType:  aws.String("application/vnd.apple.mpegurl"),
+      CacheControl: aws.String("public, max-age=3600"),
+    }); err != nil {
 			return fmt.Errorf("upload HLS %s: %w", r.Name, err)
 		}
+
 		log.Info("uploaded rendition playlist", zap.String("key", hlsKey))
 	}
 
-	// 2) Build HLS master
-	masterBytes, err := buildMasterPlaylist(renditions)
+	masterBytes, err := buildMasterPlaylist(renditions, cdnBaseURL, packagedPrefix, videoID)
 	if err != nil {
 		return fmt.Errorf("master m3u8: %w", err)
 	}
 	masterKey := filepath.ToSlash(filepath.Join(packagedPrefix, videoID, "hls", "master.m3u8"))
-	if err := putString(ctx, uploader, bucket, masterKey, "application/vnd.apple.mpegurl", "public, max-age=3600", masterBytes); err != nil {
+	if _, err := uploader.UploadWithContext(ctx, &s3manager.UploadInput{
+		Bucket:       aws.String(bucket),
+		Key:          aws.String(masterKey),
+		Body:         bytes.NewReader(masterBytes),
+		ContentType:  aws.String("application/vnd.apple.mpegurl"),
+		CacheControl: aws.String("public, max-age=3600"),
+	}); err != nil {
 		return fmt.Errorf("upload master.m3u8: %w", err)
 	}
 	log.Info("uploaded master.m3u8", zap.String("key", masterKey))
 
 	// 3) Build DASH MPD (multi-representation, SegmentTemplate)
-	mpdBytes, err := buildMPD(videoID, transcodedPrefix, renditionSegments)
+	mpdBytes, err := buildMPD(videoID, transcodedPrefix, renditionSegments, cdnBaseURL)
 	if err != nil {
 		return fmt.Errorf("build MPD: %w", err)
 	}
 	mpdKey := filepath.ToSlash(filepath.Join(packagedPrefix, videoID, "dash", "master.mpd"))
-	if err := putString(ctx, uploader, bucket, mpdKey, "application/dash+xml", "public, max-age=3600", mpdBytes); err != nil {
+	if _, err := uploader.UploadWithContext(ctx, &s3manager.UploadInput{
+		Bucket:       aws.String(bucket),
+		Key:          aws.String(mpdKey),
+		Body:         bytes.NewReader(mpdBytes),
+		ContentType:  aws.String("application/dash+xml"),
+		CacheControl: aws.String("public, max-age=3600"),
+	}); err != nil {
 		return fmt.Errorf("upload master.mpd: %w", err)
 	}
 	log.Info("uploaded master.mpd", zap.String("key", mpdKey))
@@ -95,6 +113,7 @@ func buildRenditionPlaylist(
 	s3c *s3.S3,
 	bucket, transcodedPrefix, videoID string,
 	r renditionSpec,
+	cdnBaseURL string,
 ) ([]string, []byte, error) {
 	prefix := filepath.ToSlash(filepath.Join(transcodedPrefix, videoID, r.Name)) + "/"
 	var keys []string
@@ -124,35 +143,34 @@ func buildRenditionPlaylist(
 	fmt.Fprintln(&b, "#EXT-X-INDEPENDENT-SEGMENTS")
 	fmt.Fprintln(&b, "#EXT-X-TARGETDURATION:4")
 	fmt.Fprintln(&b, "#EXT-X-MEDIA-SEQUENCE:0")
-	for range keys {
+	for _, k :=range keys {
 		fmt.Fprintln(&b, "#EXTINF:4.000,")
-	}
-	for _, k := range keys {
-		fmt.Fprintf(&b, "/%s\n", strings.TrimPrefix(k, "/"))
+		pathWithoutBucket := strings.TrimPrefix(k, bucket+"/")
+		fmt.Fprintf(&b, "%s/%s\n", cdnBaseURL, pathWithoutBucket)
 	}
 	fmt.Fprintln(&b, "#EXT-X-ENDLIST")
 
 	return keys, b.Bytes(), nil
 }
 
-func buildMasterPlaylist(rends []renditionSpec) ([]byte, error) {
+func buildMasterPlaylist(rends []renditionSpec, cdnBaseURL, packagedPrefix, videoID string) ([]byte, error) {
 	var b bytes.Buffer
 	fmt.Fprintln(&b, "#EXTM3U")
 	fmt.Fprintln(&b, "#EXT-X-VERSION:7")
 	fmt.Fprintln(&b, "#EXT-X-INDEPENDENT-SEGMENTS")
 	for _, r := range rends {
 		fmt.Fprintf(&b, "#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%s\n", r.Bandwidth, r.Resolution)
-		fmt.Fprintf(&b, "%s.m3u8\n", r.Name)
+		fmt.Fprintf(&b, "%s/%s/%s/hls/%s.m3u8\n", cdnBaseURL, packagedPrefix, videoID, r.Name)
 	}
 	return b.Bytes(), nil
 }
 
-func buildMPD(videoID, transcodedPrefix string, segments map[string][]string) ([]byte, error) {
+func buildMPD(videoID, transcodedPrefix string, segments map[string][]string, cdnBaseURL string) ([]byte, error) {
 	var b bytes.Buffer
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	fmt.Fprintf(&b, `<?xml version="1.0" encoding="UTF-8"?>`+"\n")
-	fmt.Fprintf(&b, `<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT%dS" minBufferTime="PT1.5S" profiles="urn:mpeg:dash:profile:isoff-on-demand:2011" availabilityStartTime="%s">`+"\n", len(firstSegList(segments))*4, now)
+	fmt.Fprintf(&b, `<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT%dS" minBufferTime="PT1.5S" profiles="urn:mpeg:dash:profile:isoff-on-demand:2011" availabilityStartTime="%s">`+"\n", len(totalSegments(segments))*4, now)
 	fmt.Fprintln(&b, `<Period>`)
 
 	for _, r := range renditions {
@@ -163,7 +181,7 @@ func buildMPD(videoID, transcodedPrefix string, segments map[string][]string) ([
 		fmt.Fprintf(&b, `<AdaptationSet mimeType="video/mp4" segmentAlignment="true" startWithSAP="1">`+"\n")
 		fmt.Fprintf(&b, `<Representation id="%s" bandwidth="%d" width="%s" height="%s" codecs="avc1.4d401f,mp4a.40.2">`+"\n",
 			r.Name, r.Bandwidth, strings.Split(r.Resolution, "x")[0], strings.Split(r.Resolution, "x")[1])
-		fmt.Fprintf(&b, `<BaseURL>/%s/%s/%s/</BaseURL>`+"\n", transcodedPrefix, videoID, r.Name)
+		fmt.Fprintf(&b, `<BaseURL>%s/%s/%s/%s/</BaseURL>`+"\n", cdnBaseURL, transcodedPrefix, videoID, r.Name)
 		fmt.Fprintf(&b, `<SegmentTemplate media="chunk-$Number$.m4s" startNumber="0" duration="4" timescale="1"/>`+"\n")
 		fmt.Fprintln(&b, `</Representation>`)
 		fmt.Fprintln(&b, `</AdaptationSet>`)
@@ -174,31 +192,15 @@ func buildMPD(videoID, transcodedPrefix string, segments map[string][]string) ([
 	return b.Bytes(), nil
 }
 
-func putString(
-	ctx context.Context,
-	uploader *s3manager.Uploader,
-	bucket, key, contentType, cacheControl string,
-	data []byte,
-) error {
-	_, err := uploader.UploadWithContext(ctx, &s3manager.UploadInput{
-		Bucket:       aws.String(bucket),
-		Key:          aws.String(key),
-		Body:         bytes.NewReader(data),
-		ContentType:  aws.String(contentType),
-		CacheControl: aws.String(cacheControl),
-	})
-	return err
-}
-
 var chunkNumRe = regexp.MustCompile(`chunk-(\d+)\.m4s$`)
 
 func sortByChunkNumber(keys []string) {
 	sort.Slice(keys, func(i, j int) bool {
-		return lastChunkNum(keys[i]) < lastChunkNum(keys[j])
+		return extractChunkNumber(keys[i]) < extractChunkNumber(keys[j])
 	})
 }
 
-func lastChunkNum(key string) int {
+func extractChunkNumber(key string) int {
 	m := chunkNumRe.FindStringSubmatch(strings.ToLower(key))
 	if len(m) != 2 {
 		return int(time.Now().UnixNano())
@@ -210,7 +212,7 @@ func lastChunkNum(key string) int {
 	return n
 }
 
-func firstSegList(m map[string][]string) []string {
+func totalSegments(m map[string][]string) []string {
 	for _, v := range m {
 		if len(v) > 0 {
 			return v

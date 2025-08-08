@@ -13,6 +13,7 @@ type Config struct {
 	AWSRegion   string
 	TranscodedPrefix   string
 	PackagedPrefix string
+	CDNBaseURL string
 }
 
 func LoadConfig() (*Config, error) {
@@ -27,6 +28,7 @@ func LoadConfig() (*Config, error) {
 		"AWS_REGION",
 		"TRANSCODED_PREFIX",
 		"PACKAGED_PREFIX",
+		"CDN_BASE_URL",
 	}
 
 	for _, key := range required {
@@ -41,6 +43,7 @@ func LoadConfig() (*Config, error) {
 		AWSRegion:    viper.GetString("AWS_REGION"),
 		TranscodedPrefix:    viper.GetString("TRANSCODED_PREFIX"),
 		PackagedPrefix: viper.GetString("PACKAGED_PREFIX"),
+		CDNBaseURL: viper.GetString("CDN_BASE_URL"),
 	}
 	return cfg, nil
 }

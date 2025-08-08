@@ -43,7 +43,7 @@ func main() {
 	}
 	defer rabbitChannel.Close()
 
-	rabbitConsumer, err := rabbit.NewConsumer(rabbitChannel, logger, config.BucketName, config.RawDomain, config.PackagedPrefix, s3Client, session)
+	rabbitConsumer, err := rabbit.NewConsumer(rabbitChannel, logger, config.BucketName, config.TranscodedPrefix, config.PackagedPrefix, config.CDNBaseURL, s3Client, session)
 	if err != nil {
 		panic("failed to create RabbitMQ consumer: " + err.Error())
 	}
