@@ -3,7 +3,9 @@ package processor
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
+	"io"
 	"path"
 	"regexp"
 	"sort"
@@ -22,10 +24,265 @@ type renditionSpec struct {
 	Bandwidth  int    // peak bitrate in bits/sec
 }
 
+type CodecInfo struct {
+	VideoCodec string
+	AudioCodec string
+	AudioSampleRate int
+}
+
 var renditions = []renditionSpec{
 	{Name: "1080p", Resolution: "1920x1080", Bandwidth: 5000000},
 	{Name: "720p",  Resolution: "1280x720",  Bandwidth: 3000000},
 	{Name: "480p",  Resolution: "854x480",   Bandwidth: 1200000},
+}
+
+// parseCodecsFromInit extracts codec information from init.mp4 by parsing MP4 boxes
+func parseCodecsFromInit(ctx context.Context, s3Client *s3.S3, bucket, initKey string) (*CodecInfo, error) {
+	// Download init.mp4 from S3
+	resp, err := s3Client.GetObjectWithContext(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(initKey),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("download init.mp4: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Read the entire init.mp4 into memory (should be small)
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read init.mp4: %w", err)
+	}
+
+	return parseMP4Codecs(data)
+}
+
+// parseMP4Codecs parses MP4 boxes to extract codec information
+func parseMP4Codecs(data []byte) (*CodecInfo, error) {
+	codecs := &CodecInfo{
+		VideoCodec: "avc1.64001e", // fallback
+		AudioCodec: "mp4a.40.2",   // fallback
+		AudioSampleRate: 48000,    // fallback
+	}
+
+	reader := bytes.NewReader(data)
+	
+	for {
+		box, err := readMP4Box(reader)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return codecs, nil // return fallback on parse errors
+		}
+
+		switch box.Type {
+		case "moov":
+			// Parse movie box for track information
+			if err := parseMovieBox(box.Data, codecs); err == nil {
+				return codecs, nil
+			}
+		}
+	}
+
+	return codecs, nil
+}
+
+type mp4Box struct {
+	Size uint32
+	Type string
+	Data []byte
+}
+
+func readMP4Box(r io.Reader) (*mp4Box, error) {
+	var header [8]byte
+	if _, err := io.ReadFull(r, header[:]); err != nil {
+		return nil, err
+	}
+
+	size := binary.BigEndian.Uint32(header[0:4])
+	boxType := string(header[4:8])
+
+	if size < 8 {
+		return nil, fmt.Errorf("invalid box size: %d", size)
+	}
+
+	dataSize := size - 8
+	data := make([]byte, dataSize)
+	if _, err := io.ReadFull(r, data); err != nil {
+		return nil, err
+	}
+
+	return &mp4Box{
+		Size: size,
+		Type: boxType,
+		Data: data,
+	}, nil
+}
+
+func parseMovieBox(data []byte, codecs *CodecInfo) error {
+	reader := bytes.NewReader(data)
+	
+	for {
+		box, err := readMP4Box(reader)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+
+		if box.Type == "trak" {
+			parseTrackBox(box.Data, codecs)
+		}
+	}
+	
+	return nil
+}
+
+func parseTrackBox(data []byte, codecs *CodecInfo) {
+	reader := bytes.NewReader(data)
+	
+	for {
+		box, err := readMP4Box(reader)
+		if err != nil {
+			break
+		}
+
+		if box.Type == "mdia" {
+			parseMediaBox(box.Data, codecs)
+		}
+	}
+}
+
+func parseMediaBox(data []byte, codecs *CodecInfo) {
+	reader := bytes.NewReader(data)
+	
+	for {
+		box, err := readMP4Box(reader)
+		if err != nil {
+			break
+		}
+
+		switch box.Type {
+		case "mdhd":
+			// Media header - extract timescale/sample rate
+			if len(box.Data) >= 20 {
+				// Skip version and flags (4 bytes), creation/modification time (8 bytes)
+				timescale := binary.BigEndian.Uint32(box.Data[12:16])
+				if timescale > 1000 && timescale <= 48000 {
+					codecs.AudioSampleRate = int(timescale)
+				}
+			}
+		case "minf":
+			parseMediaInfoBox(box.Data, codecs)
+		}
+	}
+}
+
+func parseMediaInfoBox(data []byte, codecs *CodecInfo) {
+	reader := bytes.NewReader(data)
+	
+	for {
+		box, err := readMP4Box(reader)
+		if err != nil {
+			break
+		}
+
+		if box.Type == "stbl" {
+			parseSampleTableBox(box.Data, codecs)
+		}
+	}
+}
+
+func parseSampleTableBox(data []byte, codecs *CodecInfo) {
+	reader := bytes.NewReader(data)
+	
+	for {
+		box, err := readMP4Box(reader)
+		if err != nil {
+			break
+		}
+
+		if box.Type == "stsd" {
+			parseSampleDescriptionBox(box.Data, codecs)
+		}
+	}
+}
+
+func parseSampleDescriptionBox(data []byte, codecs *CodecInfo) {
+	if len(data) < 8 {
+		return
+	}
+
+	reader := bytes.NewReader(data[8:]) // Skip version, flags, and entry count
+	
+	for {
+		box, err := readMP4Box(reader)
+		if err != nil {
+			break
+		}
+
+		switch box.Type {
+		case "avc1", "avc3":
+			// H.264 video
+			if videoCodec := parseAVCCodec(box.Data); videoCodec != "" {
+				codecs.VideoCodec = videoCodec
+			}
+		case "mp4a":
+			// AAC audio
+			if audioCodec := parseAudioCodec(box.Data); audioCodec != "" {
+				codecs.AudioCodec = audioCodec
+			}
+		}
+	}
+}
+
+func parseAVCCodec(data []byte) string {
+	// Look for avcC box within avc1/avc3
+	reader := bytes.NewReader(data[78:]) // Skip visual sample entry fields
+	
+	for {
+		box, err := readMP4Box(reader)
+		if err != nil {
+			break
+		}
+
+		if box.Type == "avcC" && len(box.Data) >= 4 {
+			// Extract profile, profile compatibility, and level
+			profile := box.Data[1]
+			profileCompat := box.Data[2]
+			level := box.Data[3]
+			
+			return fmt.Sprintf("avc1.%02x%02x%02x", profile, profileCompat, level)
+		}
+	}
+	
+	return ""
+}
+
+func parseAudioCodec(data []byte) string {
+	// Look for esds box within mp4a
+	reader := bytes.NewReader(data[28:]) // Skip audio sample entry fields
+	
+	for {
+		box, err := readMP4Box(reader)
+		if err != nil {
+			break
+		}
+
+		if box.Type == "esds" && len(box.Data) >= 5 {
+			// Parse elementary stream descriptor to get audio object type
+			// This is a simplified parser - in practice, ESDS is more complex
+			for i := 0; i < len(box.Data)-1; i++ {
+				if box.Data[i] == 0x40 { // Audio ISO/IEC 14496-3
+					return "mp4a.40.2" // AAC LC
+				}
+			}
+		}
+	}
+	
+	return ""
 }
 
 func Process(
@@ -90,8 +347,26 @@ func Process(
 	}
 	log.Info("uploaded master.m3u8", zap.String("key", masterKey))
 
-	// 3) Build DASH MPD (multi-representation, SegmentTemplate)
-	mpdBytes, err := buildMPD(videoID, transcodedPrefix, renditionSegments, cdnBaseURL)
+	// 3) Parse codec information from first rendition's init.mp4
+	firstRendition := renditions[0]
+	initKey := path.Join(transcodedPrefix, videoID, firstRendition.Name, "init.mp4")
+	var codecInfo *CodecInfo
+	codecInfo, err = parseCodecsFromInit(ctx, s3Client, bucket, initKey)
+	if err != nil {
+		log.Warn("failed to parse codecs, using defaults", zap.Error(err))
+		codecInfo = &CodecInfo{
+			VideoCodec: "avc1.64001e",
+			AudioCodec: "mp4a.40.2", 
+			AudioSampleRate: 48000,
+		}
+	}
+	log.Info("detected codecs", 
+		zap.String("video", codecInfo.VideoCodec), 
+		zap.String("audio", codecInfo.AudioCodec),
+		zap.Int("sampleRate", codecInfo.AudioSampleRate))
+
+	// 4) Build DASH MPD with parsed codec information
+	mpdBytes, err := buildMPD(videoID, transcodedPrefix, renditionSegments, cdnBaseURL, codecInfo)
 	if err != nil {
 		return fmt.Errorf("build MPD: %w", err)
 	}
@@ -175,7 +450,7 @@ func buildMasterPlaylist(rends []renditionSpec) ([]byte, error) {
 }
 
 
-func buildMPD(videoID, transcodedPrefix string, segments map[string][]string, cdnBaseURL string) ([]byte, error) {
+func buildMPD(videoID, transcodedPrefix string, segments map[string][]string, cdnBaseURL string, codecInfo *CodecInfo) ([]byte, error) {
     cdn := strings.TrimRight(cdnBaseURL, "/")
     maxN := 0
     for _, v := range segments { if len(v) > maxN { maxN = len(v) } }
@@ -195,7 +470,7 @@ func buildMPD(videoID, transcodedPrefix string, segments map[string][]string, cd
         wh := strings.Split(r.Resolution, "x")
         w, h := wh[0], wh[1]
 
-        fmt.Fprintf(&b, `<Representation id="%s" bandwidth="%d" width="%s" height="%s" codecs="avc1.64001e" frameRate="25">`+"\n", r.Name, r.Bandwidth, w, h)
+        fmt.Fprintf(&b, `<Representation id="%s" bandwidth="%d" width="%s" height="%s" codecs="%s" frameRate="25">`+"\n", r.Name, r.Bandwidth, w, h, codecInfo.VideoCodec)
         fmt.Fprintf(&b, `<BaseURL>%s/%s/</BaseURL>`+"\n", cdn, path.Join(transcodedPrefix, videoID, r.Name))
         
         // Use proper timescale for DASH (90000 is MPEG standard)
@@ -220,7 +495,7 @@ func buildMPD(videoID, transcodedPrefix string, segments map[string][]string, cd
     firstRendition := renditions[0]
     segs := segments[firstRendition.Name]
     if len(segs) > 0 {
-        fmt.Fprintf(&b, `<Representation id="audio" bandwidth="128000" audioSamplingRate="48000" codecs="mp4a.40.2">`+"\n")
+        fmt.Fprintf(&b, `<Representation id="audio" bandwidth="128000" audioSamplingRate="%d" codecs="%s">`+"\n", codecInfo.AudioSampleRate, codecInfo.AudioCodec)
         fmt.Fprintf(&b, `<AudioChannelConfiguration schemeIdUri="urn:mpeg:dash:23003:3:audio_channel_configuration:2011" value="2"/>`+"\n")
         fmt.Fprintf(&b, `<BaseURL>%s/%s/</BaseURL>`+"\n", cdn, path.Join(transcodedPrefix, videoID, firstRendition.Name))
         
