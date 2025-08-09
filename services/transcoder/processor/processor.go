@@ -1,16 +1,17 @@
 package processor
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"mime"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/GoyalIshaan/vidSmith/services/transcoder/types"
 	"github.com/aws/aws-sdk-go/aws"
@@ -116,71 +117,113 @@ func Process(
 
 func processSingleRendition(
 	ctx context.Context,
-  	uploader *s3manager.Uploader,
+	uploader *s3manager.Uploader,
 	bucket, localVideoPath, transcodedPrefix, videoID string,
 	r renditionSpec,
 	stagingBase string,
-  	logger *zap.Logger,
+	logger *zap.Logger,
 ) error {
 	log := logger.With(zap.String("rendition", r.Name))
 
-	reditionDirKey := filepath.Join(stagingBase, r.Name)
-	if err := os.MkdirAll(reditionDirKey, 0755); err != nil {
+	renditionDir := filepath.Join(stagingBase, r.Name)
+	if err := os.MkdirAll(renditionDir, 0755); err != nil {
 		return fmt.Errorf("create rendition directory: %w", err)
 	}
+	defer os.RemoveAll(renditionDir)
 
-	defer os.RemoveAll(reditionDirKey)
-
-	prList, pwList := io.Pipe()
-
-	ffmpegCommand := exec.CommandContext(ctx, "ffmpeg", argBuilder(r, reditionDirKey, localVideoPath)...)
-	ffmpegCommand.Stdout = pwList
+	cmd := exec.CommandContext(ctx, "ffmpeg", argBuilder(r, renditionDir, localVideoPath)...)
 
 	var stderrBuf bytes.Buffer
-	ffmpegCommand.Stderr = &stderrBuf
+	cmd.Stderr = &stderrBuf
 
-	if err := ffmpegCommand.Start(); err != nil {
+	// Start uploader watcher BEFORE starting ffmpeg
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	wg.Add(1)
+	go watchAndUploadSegments(
+		ctx, &wg, stop, uploader, bucket,
+		transcodedPrefix, videoID, r.Name, renditionDir, log,
+	)
+
+	if err := cmd.Start(); err != nil {
+		close(stop)
+		wg.Wait()
 		return fmt.Errorf("ffmpeg (%s): %w", r.Name, err)
 	}
 
-	var wg sync.WaitGroup
-	scanner := bufio.NewScanner(prList)
-
-	go detectNewChunk(scanner, &wg, transcodedPrefix, videoID, r.Name, reditionDirKey, log, uploader, bucket, ctx)
-
-	if err := ffmpegCommand.Wait(); err != nil {
+	if err := cmd.Wait(); err != nil {
+		close(stop)
+		wg.Wait()
 		return fmt.Errorf("ffmpeg (%s) failed: %w\n%s", r.Name, err, stderrBuf.String())
 	}
 
-	pwList.Close()
+	// Signal watcher to do a final sweep and exit
+	close(stop)
 	wg.Wait()
 
 	log.Info("rendition complete")
-
 	return nil
 }
 
-func detectNewChunk(
-	scanner *bufio.Scanner, 
-	wg *sync.WaitGroup, 
-	transcodedPrefix, videoID, renditionName, renditionDir string,
-	log *zap.Logger,
-	uploader *s3manager.Uploader,
-	bucket string,
+
+func watchAndUploadSegments(
 	ctx context.Context,
+	wg *sync.WaitGroup,
+	stop <-chan struct{},
+	uploader *s3manager.Uploader,
+	bucket, transcodedPrefix, videoID, renditionName, dir string,
+	log *zap.Logger,
 ) {
-	for scanner.Scan() {
-		fileName := scanner.Text() // FFmpeg outputs just the filename
-		fullPath := filepath.Join(renditionDir, fileName)
-		s3Key := filepath.Join(transcodedPrefix, videoID, renditionName, fileName)
+	defer wg.Done()
+
+
+	t := time.NewTicker(300 * time.Millisecond)
+	defer t.Stop()
+
+	uploadIfReady := func(name string) {
+		// Only care about init.mp4 and *.m4s
+		if !(name == "init.mp4" || strings.HasSuffix(name, ".m4s")) {
+			return
+		}
+		pathFS := filepath.Join(dir, name)
 		
-		wg.Add(1)
-		go uploadChunk(uploader, bucket, s3Key, fullPath, log, wg, ctx)
+		s3Key := path.Join(transcodedPrefix, videoID, renditionName, name)
+		var upWG sync.WaitGroup
+		upWG.Add(1)
+		go uploadChunk(uploader, bucket, s3Key, pathFS, log, &upWG, ctx)
+		upWG.Wait() // ensure removal before next tick
+	
 	}
-	if err := scanner.Err(); err != nil {
-		log.Error("scan failed", zap.Error(err))
+
+	scan := func() {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			log.Warn("scan dir failed", zap.Error(err))
+			return
+		}
+		for _, e := range entries {
+			if e.IsDir() { continue }
+			// Ignore the playlist
+			if e.Name() == "ignored.m3u8" { continue }
+			uploadIfReady(e.Name())
+		}
+	}
+
+	for {
+		select {
+		case <-stop:
+			// final flush
+			for i := 0; i < 6; i++ { // ~1.8s of final settling
+				scan()
+				time.Sleep(300 * time.Millisecond)
+			}
+			return
+		case <-t.C:
+			scan()
+		}
 	}
 }
+
 
 func uploadChunk(
 	uploader *s3manager.Uploader,
@@ -199,9 +242,13 @@ func uploadChunk(
 	defer file.Close()
 
 	ct := mime.TypeByExtension(filepath.Ext(path))
-	if ct == "" {
-		ct = "video/iso.segment"
-	}
+
+	if strings.HasSuffix(path, ".m4s") {
+        ct = "video/mp4"
+    }
+    if ct == "" {
+        ct = "application/octet-stream"
+    }
 
 	if _, err := uploader.UploadWithContext(ctx, &s3manager.UploadInput{
 		Bucket: aws.String(bucket),
@@ -239,18 +286,16 @@ func argBuilder(r renditionSpec, segDir, inputVideoPath string) []string {
         // audio encode
         "-c:a", "aac", "-b:a", "128k",
 
-        // DASH muxer (NOT the segment muxer)
-        "-f", "dash",
-        "-seg_duration", "4",
-        "-use_template", "1",
-        "-use_timeline", "0",
-        "-init_seg_name", "init.mp4",
-        "-media_seg_name", "chunk-$Number%03d$.m4s",
-        "-single_file", "0",
-        "-remove_at_exit", "0",
+        // HLS muxer
+        "-f", "hls",
+		"-hls_segment_type", "fmp4",
+		"-hls_time", "4",
+		"-hls_flags", "independent_segments", // IDR at segment start
+		"-hls_segment_filename", filepath.Join(segDir, "chunk-%05d.m4s"),
+		"-hls_fmp4_init_filename", "init.mp4",
 
         // output MPD path (segments land in segDir)
-        filepath.Join(segDir, "ignored.mpd"),
+        filepath.Join(segDir, "ignored.m3u8"),
     }
 }
 

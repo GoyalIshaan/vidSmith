@@ -132,7 +132,7 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery, bucketName strin
 	// Use the existing s3Client's session instead of creating a new one
 	// invoking the transcoding service
 
-	err := processor.Process(ctx, req, bucketName, transcodedPrefix, awsSession, c.logger)
+	err := processor.Process(ctx, req, bucketName, transcodedPrefix, s3Client, awsSession, c.logger)
 	if err != nil {
 		c.logger.Error("transcoding failed", zap.Error(err))
 		d.Nack(false, true) // requeue for retry

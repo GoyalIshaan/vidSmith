@@ -4,11 +4,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"path/filepath"
+	"path"
 	"regexp"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -50,6 +49,10 @@ func Process(
 
 	renditionSegments := make(map[string][]string)
 
+
+	masterKey := path.Join(packagedPrefix, videoID, "hls", "master.m3u8")
+	mpdKey := path.Join(packagedPrefix, videoID, "dash", "master.mpd")
+
 	for _, r := range renditions {
 		keys, plBytes, err := buildRenditionPlaylist(ctx, s3Client, bucket, transcodedPrefix, videoID, r, cdnBaseURL)
 		if err != nil {
@@ -57,25 +60,25 @@ func Process(
 		}
     
 		renditionSegments[r.Name] = keys
-		hlsKey := filepath.ToSlash(filepath.Join(packagedPrefix, videoID, "hls", r.Name+".m3u8"))
+		hlsKey := path.Join(packagedPrefix, videoID, "hls", r.Name+".m3u8")
 		if _, err := uploader.UploadWithContext(ctx, &s3manager.UploadInput{
-      Bucket:       aws.String(bucket),
-      Key:          aws.String(hlsKey),
-      Body:         bytes.NewReader(plBytes),
-      ContentType:  aws.String("application/vnd.apple.mpegurl"),
-      CacheControl: aws.String("public, max-age=3600"),
-    }); err != nil {
+			Bucket:       aws.String(bucket),
+			Key:          aws.String(hlsKey),
+			Body:         bytes.NewReader(plBytes),
+			ContentType:  aws.String("application/vnd.apple.mpegurl"),
+			CacheControl: aws.String("public, max-age=3600"),
+		}); err != nil {
 			return fmt.Errorf("upload HLS %s: %w", r.Name, err)
 		}
 
 		log.Info("uploaded rendition playlist", zap.String("key", hlsKey))
 	}
 
-	masterBytes, err := buildMasterPlaylist(renditions, cdnBaseURL, packagedPrefix, videoID)
+	masterBytes, err := buildMasterPlaylist(renditions)
 	if err != nil {
 		return fmt.Errorf("master m3u8: %w", err)
 	}
-	masterKey := filepath.ToSlash(filepath.Join(packagedPrefix, videoID, "hls", "master.m3u8"))
+
 	if _, err := uploader.UploadWithContext(ctx, &s3manager.UploadInput{
 		Bucket:       aws.String(bucket),
 		Key:          aws.String(masterKey),
@@ -92,7 +95,7 @@ func Process(
 	if err != nil {
 		return fmt.Errorf("build MPD: %w", err)
 	}
-	mpdKey := filepath.ToSlash(filepath.Join(packagedPrefix, videoID, "dash", "master.mpd"))
+
 	if _, err := uploader.UploadWithContext(ctx, &s3manager.UploadInput{
 		Bucket:       aws.String(bucket),
 		Key:          aws.String(mpdKey),
@@ -109,96 +112,109 @@ func Process(
 }
 
 func buildRenditionPlaylist(
-	ctx context.Context,
-	s3c *s3.S3,
-	bucket, transcodedPrefix, videoID string,
-	r renditionSpec,
-	cdnBaseURL string,
+    ctx context.Context,
+    s3c *s3.S3,
+    bucket, transcodedPrefix, videoID string,
+    r renditionSpec,
+    cdnBaseURL string,
 ) ([]string, []byte, error) {
-	prefix := filepath.ToSlash(filepath.Join(transcodedPrefix, videoID, r.Name)) + "/"
-	var keys []string
+    prefix := path.Join(transcodedPrefix, videoID, r.Name) + "/"
 
-	input := &s3.ListObjectsV2Input{Bucket: aws.String(bucket), Prefix: aws.String(prefix)}
-	err := s3c.ListObjectsV2PagesWithContext(ctx, input, func(p *s3.ListObjectsV2Output, last bool) bool {
-		for _, obj := range p.Contents {
-			k := aws.StringValue(obj.Key)
-			if strings.HasSuffix(strings.ToLower(k), ".m4s") {
-				keys = append(keys, k)
-			}
-		}
-		return true
-	})
-	if err != nil {
-		return nil, nil, fmt.Errorf("list segments: %w", err)
-	}
-	if len(keys) == 0 {
-		return nil, nil, fmt.Errorf("no segments found for %s", r.Name)
-	}
-	sortByChunkNumber(keys)
+    // List .m4s segments
+    var segKeys []string
+    var hasInit bool
+    err := s3c.ListObjectsV2PagesWithContext(ctx, &s3.ListObjectsV2Input{
+        Bucket: aws.String(bucket), Prefix: aws.String(prefix),
+    }, func(p *s3.ListObjectsV2Output, last bool) bool {
+        for _, obj := range p.Contents {
+            k := aws.StringValue(obj.Key)
+            lk := strings.ToLower(k)
+            if strings.HasSuffix(lk, "init.mp4") { hasInit = true; continue }
+            if strings.HasSuffix(lk, ".m4s")     { segKeys = append(segKeys, k) }
+        }
+        return true
+    })
+    if err != nil { return nil, nil, fmt.Errorf("list segments: %w", err) }
+    if !hasInit { return nil, nil, fmt.Errorf("missing init.mp4 for %s", r.Name) }
+    if len(segKeys) == 0 { return nil, nil, fmt.Errorf("no segments for %s", r.Name) }
 
-	var b bytes.Buffer
-	fmt.Fprintln(&b, "#EXTM3U")
-	fmt.Fprintln(&b, "#EXT-X-VERSION:7")
-	fmt.Fprintln(&b, "#EXT-X-PLAYLIST-TYPE:VOD")
-	fmt.Fprintln(&b, "#EXT-X-INDEPENDENT-SEGMENTS")
-	fmt.Fprintln(&b, "#EXT-X-TARGETDURATION:4")
-	fmt.Fprintln(&b, "#EXT-X-MEDIA-SEQUENCE:0")
-	for _, pathKey :=range keys {
-		fmt.Fprintln(&b, "#EXTINF:4.000,")
-		// Use relative path from /manifests/{videoId}/hls/ to /transcoded/{videoId}/{rendition}/
-		fmt.Fprintf(&b, "../../../%s\n", pathKey)
-	}
-	fmt.Fprintln(&b, "#EXT-X-ENDLIST")
+    sortByChunkNumber(segKeys)
+    cdn := strings.TrimRight(cdnBaseURL, "/")
 
-	return keys, b.Bytes(), nil
+    var b bytes.Buffer
+    fmt.Fprintln(&b, "#EXTM3U")
+    fmt.Fprintln(&b, "#EXT-X-VERSION:7")
+    fmt.Fprintln(&b, "#EXT-X-PLAYLIST-TYPE:VOD")
+    fmt.Fprintln(&b, "#EXT-X-INDEPENDENT-SEGMENTS")
+    fmt.Fprintln(&b, "#EXT-X-TARGETDURATION:4")
+    fmt.Fprintln(&b, "#EXT-X-MEDIA-SEQUENCE:0")
+    // <-- critical for fMP4 playlists
+    fmt.Fprintf(&b, "#EXT-X-MAP:URI=\"%s/%s\"\n", cdn, path.Join(transcodedPrefix, videoID, r.Name, "init.mp4"))
+
+    for _, key := range segKeys {
+        fmt.Fprintln(&b, "#EXTINF:4.000,")
+        fmt.Fprintf(&b, "%s/%s\n", cdn, key) // absolute URI to CDN
+    }
+    fmt.Fprintln(&b, "#EXT-X-ENDLIST")
+
+    return segKeys, b.Bytes(), nil
 }
 
-func buildMasterPlaylist(rends []renditionSpec, cdnBaseURL, packagedPrefix, videoID string) ([]byte, error) {
-	var b bytes.Buffer
-	fmt.Fprintln(&b, "#EXTM3U")
-	fmt.Fprintln(&b, "#EXT-X-VERSION:7")
-	fmt.Fprintln(&b, "#EXT-X-INDEPENDENT-SEGMENTS")
-	for _, r := range rends {
-		fmt.Fprintf(&b, "#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%s\n", r.Bandwidth, r.Resolution)
-		fmt.Fprintf(&b, "%s.m3u8\n", r.Name)
-	}
-	return b.Bytes(), nil
+
+func buildMasterPlaylist(rends []renditionSpec) ([]byte, error) {
+    var b bytes.Buffer
+    fmt.Fprintln(&b, "#EXTM3U")
+    fmt.Fprintln(&b, "#EXT-X-VERSION:7")
+    fmt.Fprintln(&b, "#EXT-X-INDEPENDENT-SEGMENTS")
+    for _, r := range rends {
+        // libx264 + AAC default; refine if you later set explicit profiles
+        fmt.Fprintf(&b, "#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%s,CODECS=\"avc1.640028,mp4a.40.2\"\n",
+            r.Bandwidth, r.Resolution)
+        fmt.Fprintf(&b, "%s.m3u8\n", r.Name)
+    }
+    return b.Bytes(), nil
 }
+
 
 func buildMPD(videoID, transcodedPrefix string, segments map[string][]string, cdnBaseURL string) ([]byte, error) {
-	var b bytes.Buffer
-	now := time.Now().UTC().Format(time.RFC3339)
+    cdn := strings.TrimRight(cdnBaseURL, "/")
+    // compute max segment count across renditions
+    maxN := 0
+    for _, v := range segments {
+        if len(v) > maxN { maxN = len(v) }
+    }
+    if maxN == 0 { return nil, fmt.Errorf("no segments found for MPD") }
 
-	fmt.Fprintf(&b, `<?xml version="1.0" encoding="UTF-8"?>`+"\n")
-	fmt.Fprintf(&b, `<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT%dS" minBufferTime="PT1.5S" profiles="urn:mpeg:dash:profile:isoff-on-demand:2011" availabilityStartTime="%s">`+"\n", len(totalSegments(segments))*4, now)
-	fmt.Fprintln(&b, `<Period>`)
+    var b bytes.Buffer
+    fmt.Fprintf(&b, `<?xml version="1.0" encoding="UTF-8"?>`+"\n")
+    fmt.Fprintf(&b,
+        `<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT%dS" minBufferTime="PT1.5S" profiles="urn:mpeg:dash:profile:isoff-main:2011">`+"\n",
+        maxN*4,
+    )
+    fmt.Fprintln(&b, `<Period>`)
 
-	for _, r := range renditions {
-		keys := segments[r.Name]
-		if len(keys) == 0 {
-			continue
-		}
-		fmt.Fprintf(&b, `<AdaptationSet mimeType="video/mp4" segmentAlignment="true" startWithSAP="1">`+"\n")
-		fmt.Fprintf(&b, `<Representation id="%s" bandwidth="%d" width="%s" height="%s" codecs="avc1.4d401f,mp4a.40.2">`+"\n",
-			r.Name, r.Bandwidth, strings.Split(r.Resolution, "x")[0], strings.Split(r.Resolution, "x")[1])
-		
-		// Use SegmentList with explicit URLs instead of SegmentTemplate
-		fmt.Fprintln(&b, `<SegmentList duration="4" timescale="1">`)
-		for _, segmentKey := range keys {
-			fmt.Fprintf(&b, `<SegmentURL media="%s/%s"/>`+"\n", cdnBaseURL, segmentKey)
-		}
-		fmt.Fprintln(&b, `</SegmentList>`)
-		
-		fmt.Fprintln(&b, `</Representation>`)
-		fmt.Fprintln(&b, `</AdaptationSet>`)
-	}
+    // ONE AdaptationSet holding all video reps
+    fmt.Fprintln(&b, `<AdaptationSet mimeType="video/mp4" segmentAlignment="true" startWithSAP="0">`)
+    for _, r := range renditions {
+        // skip renditions that didn't produce segments
+        if len(segments[r.Name]) == 0 { continue }
 
-	fmt.Fprintln(&b, `</Period>`)
-	fmt.Fprintln(&b, `</MPD>`)
-	return b.Bytes(), nil
+        wh := strings.Split(r.Resolution, "x")
+        w, h := wh[0], wh[1]
+        fmt.Fprintf(&b,
+            `<Representation id="%s" bandwidth="%d" width="%s" height="%s" codecs="avc1.640028,mp4a.40.2">`+"\n",
+            r.Name, r.Bandwidth, w, h,
+        )
+        fmt.Fprintf(&b, `<BaseURL>%s/%s/</BaseURL>`+"\n", cdn, path.Join(transcodedPrefix, videoID, r.Name))
+        fmt.Fprintln(&b, `<SegmentTemplate initialization="init.mp4" media="chunk-$Number%05d$.m4s" startNumber="0" duration="4" timescale="1"/>`)
+        fmt.Fprintln(&b, `</Representation>`)
+    }
+    fmt.Fprintln(&b, `</AdaptationSet>`)
+    fmt.Fprintln(&b, `</Period>`)
+    fmt.Fprintln(&b, `</MPD>`)
+    return b.Bytes(), nil
 }
 
-var chunkNumRe = regexp.MustCompile(`chunk-(\d{3})\.m4s$`)
 
 func sortByChunkNumber(keys []string) {
 	sort.Slice(keys, func(i, j int) bool {
@@ -206,23 +222,14 @@ func sortByChunkNumber(keys []string) {
 	})
 }
 
-func extractChunkNumber(key string) int {
-	m := chunkNumRe.FindStringSubmatch(strings.ToLower(key))
-	if len(m) != 2 {
-		return int(time.Now().UnixNano())
-	}
-	n := 0
-	for i := 0; i < len(m[1]); i++ {
-		n = n*10 + int(m[1][i]-'0')
-	}
-	return n
-}
+var chunkNumRe = regexp.MustCompile(`chunk-(\d+)\.m4s$`)
 
-func totalSegments(m map[string][]string) []string {
-	for _, v := range m {
-		if len(v) > 0 {
-			return v
-		}
-	}
-	return nil
+func extractChunkNumber(key string) int {
+    m := chunkNumRe.FindStringSubmatch(strings.ToLower(key))
+    if len(m) != 2 { return 0 }
+    n := 0
+    for i := 0; i < len(m[1]); i++ {
+        n = n*10 + int(m[1][i]-'0')
+    }
+    return n
 }

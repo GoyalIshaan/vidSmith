@@ -41,6 +41,7 @@ export type Video = {
   s3Key?: Maybe<Scalars["String"]>;
   bucketName?: Maybe<Scalars["String"]>;
   captionsKey?: Maybe<Scalars["String"]>;
+  manifestKey?: Maybe<Scalars["String"]>;
   createdAt: Scalars["String"];
 };
 
@@ -289,6 +290,11 @@ export type VideoResolvers<
     ParentType,
     ContextType
   >;
+  manifestKey?: Resolver<
+    Maybe<ResolversTypes["String"]>,
+    ParentType,
+    ContextType
+  >;
   createdAt?: Resolver<ResolversTypes["String"], ParentType, ContextType>;
   isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
 };
@@ -450,6 +456,7 @@ export interface Loaders<
     s3Key?: LoaderResolver<Maybe<Scalars["String"]>, Video, {}, TContext>;
     bucketName?: LoaderResolver<Maybe<Scalars["String"]>, Video, {}, TContext>;
     captionsKey?: LoaderResolver<Maybe<Scalars["String"]>, Video, {}, TContext>;
+    manifestKey?: LoaderResolver<Maybe<Scalars["String"]>, Video, {}, TContext>;
     createdAt?: LoaderResolver<Scalars["String"], Video, {}, TContext>;
   };
 
