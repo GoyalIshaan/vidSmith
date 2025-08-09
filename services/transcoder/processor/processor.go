@@ -181,7 +181,7 @@ func watchAndUploadSegments(
 	defer t.Stop()
 
 	uploadIfReady := func(name string) {
-		// Only care about init.mp4 and *.m4s
+		// Only care about init.mp4 and *.m4s, ignore manifest.mpd
 		if !(name == "init.mp4" || strings.HasSuffix(name, ".m4s")) {
 			return
 		}
@@ -203,8 +203,8 @@ func watchAndUploadSegments(
 		}
 		for _, e := range entries {
 			if e.IsDir() { continue }
-			// Ignore the playlist
-			if e.Name() == "ignored.m3u8" { continue }
+			// Ignore the DASH manifest
+			if e.Name() == "manifest.mpd" { continue }
 			uploadIfReady(e.Name())
 		}
 	}
@@ -247,7 +247,7 @@ func uploadChunk(
 		ct = "video/mp4"
 	}
 	if strings.HasSuffix(path, ".m4s") {
-        ct = "video/iso.segment"
+        ct = "video/mp4"
     }
     if ct == "" {
         ct = "application/octet-stream"
@@ -282,23 +282,28 @@ func argBuilder(r renditionSpec, segDir, inputVideoPath string) []string {
 
         // video encode
         "-c:v", "libx264", "-preset", "medium", "-crf", r.CRF, "-b:v", "0",
+        // Force pixel format for browser compatibility
+        "-pix_fmt", "yuv420p",
         // align keyframes to 4s segments
-        "-sc_threshold", "0",
+        "-sc_threshold", "0", 
         "-force_key_frames", "expr:gte(t,n_forced*4)",
 
-        // audio encode
-        "-c:a", "aac", "-b:a", "128k",
+        // audio encode - ensure stereo for compatibility
+        "-c:a", "aac", "-b:a", "128k", "-ac", "2",
 
-        // HLS muxer
-        "-f", "hls",
-		"-hls_segment_type", "fmp4",
-		"-hls_time", "4",
-		"-hls_flags", "independent_segments", // IDR at segment start
-		"-hls_segment_filename", filepath.Join(segDir, "chunk-%05d.m4s"),
-		"-hls_fmp4_init_filename", "init.mp4",
+        // DASH muxer with proper fragmented MP4
+        "-f", "dash",
+        "-seg_duration", "4",
+        "-frag_duration", "1",
+        "-streaming", "1",
+        "-use_template", "1",
+        "-use_timeline", "0",
+        "-init_seg_name", "init.mp4",
+        "-media_seg_name", "chunk-$Number%05d$.m4s",
+        "-adaptation_sets", "id=0,streams=v id=1,streams=a",
 
-        // output MPD path (segments land in segDir)
-        filepath.Join(segDir, "ignored.m3u8"),
+        // output manifest path
+        filepath.Join(segDir, "manifest.mpd"),
     }
 }
 

@@ -183,10 +183,11 @@ func buildMPD(videoID, transcodedPrefix string, segments map[string][]string, cd
 
     var b bytes.Buffer
     fmt.Fprintf(&b, `<?xml version="1.0" encoding="UTF-8"?>`+"\n")
-    fmt.Fprintf(&b, `<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT%dS" minBufferTime="PT1.5S" profiles="urn:mpeg:dash:profile:isoff-main:2011">`+"\n", maxN*4)
+    fmt.Fprintf(&b, `<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT%dS" minBufferTime="PT4S" profiles="urn:mpeg:dash:profile:isoff-main:2011">`+"\n", maxN*4)
     fmt.Fprintln(&b, `<Period>`)
-    fmt.Fprintln(&b, `<AdaptationSet mimeType="video/mp4" segmentAlignment="true" startWithSAP="1">`)
-
+    
+    // Video adaptation set
+    fmt.Fprintln(&b, `<AdaptationSet mimeType="video/mp4" segmentAlignment="true" startWithSAP="1" contentType="video">`)
     for _, r := range renditions {
         segs := segments[r.Name]
         if len(segs) == 0 { continue }
@@ -194,16 +195,16 @@ func buildMPD(videoID, transcodedPrefix string, segments map[string][]string, cd
         wh := strings.Split(r.Resolution, "x")
         w, h := wh[0], wh[1]
 
-        fmt.Fprintf(&b, `<Representation id="%s" bandwidth="%d" width="%s" height="%s" codecs="avc1.640028">`+"\n", r.Name, r.Bandwidth, w, h)
+        fmt.Fprintf(&b, `<Representation id="%s" bandwidth="%d" width="%s" height="%s" codecs="avc1.64001e" frameRate="25">`+"\n", r.Name, r.Bandwidth, w, h)
         fmt.Fprintf(&b, `<BaseURL>%s/%s/</BaseURL>`+"\n", cdn, path.Join(transcodedPrefix, videoID, r.Name))
-        // assume ms timing if your encoder used 1000-timescale
-        ts := 1000
-        segDur := 4000 // 4s in ms
+        
+        // Use proper timescale for DASH (90000 is MPEG standard)
+        ts := 90000
+        segDur := 360000 // 4s in 90kHz timescale (4 * 90000)
         startNum := extractChunkNumber(path.Base(segs[0]))
         if startNum == 0 { startNum = 1 } // avoid 0
         
         fmt.Fprintf(&b, `<SegmentList timescale="%d" duration="%d" startNumber="%d">`+"\n", ts, segDur, startNum)
-
         fmt.Fprintln(&b, `<Initialization sourceURL="init.mp4"/>`)
         for _, k := range segs {
             fmt.Fprintf(&b, `<SegmentURL media="%s"/>`+"\n", path.Base(k))
@@ -211,8 +212,33 @@ func buildMPD(videoID, transcodedPrefix string, segments map[string][]string, cd
         fmt.Fprintln(&b, `</SegmentList>`)
         fmt.Fprintln(&b, `</Representation>`)
     }
-
     fmt.Fprintln(&b, `</AdaptationSet>`)
+    
+    // Audio adaptation set
+    fmt.Fprintln(&b, `<AdaptationSet mimeType="audio/mp4" segmentAlignment="true" contentType="audio">`)
+    // Use first rendition for audio segments (all should have same audio)
+    firstRendition := renditions[0]
+    segs := segments[firstRendition.Name]
+    if len(segs) > 0 {
+        fmt.Fprintf(&b, `<Representation id="audio" bandwidth="128000" audioSamplingRate="48000" codecs="mp4a.40.2">`+"\n")
+        fmt.Fprintf(&b, `<AudioChannelConfiguration schemeIdUri="urn:mpeg:dash:23003:3:audio_channel_configuration:2011" value="2"/>`+"\n")
+        fmt.Fprintf(&b, `<BaseURL>%s/%s/</BaseURL>`+"\n", cdn, path.Join(transcodedPrefix, videoID, firstRendition.Name))
+        
+        ts := 90000
+        segDur := 360000 // 4s in 90kHz timescale
+        startNum := extractChunkNumber(path.Base(segs[0]))
+        if startNum == 0 { startNum = 1 }
+        
+        fmt.Fprintf(&b, `<SegmentList timescale="%d" duration="%d" startNumber="%d">`+"\n", ts, segDur, startNum)
+        fmt.Fprintln(&b, `<Initialization sourceURL="init.mp4"/>`)
+        for _, k := range segs {
+            fmt.Fprintf(&b, `<SegmentURL media="%s"/>`+"\n", path.Base(k))
+        }
+        fmt.Fprintln(&b, `</SegmentList>`)
+        fmt.Fprintln(&b, `</Representation>`)
+    }
+    fmt.Fprintln(&b, `</AdaptationSet>`)
+
     fmt.Fprintln(&b, `</Period>`)
     fmt.Fprintln(&b, `</MPD>`)
     return b.Bytes(), nil

@@ -138,6 +138,25 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
               ? dashjs.Debug.LOG_LEVEL_DEBUG
               : dashjs.Debug.LOG_LEVEL_NONE,
           },
+          streaming: {
+            retryAttempts: {
+              MPD: 3,
+              XHR: 3,
+            },
+            retryIntervals: {
+              MPD: 500,
+              XHR: 1000,
+            },
+            abandonLoadTimeout: 10000,
+            wallclockTimeUpdateInterval: 50,
+            manifestUpdateRetryInterval: 100,
+          },
+          errors: {
+            recoverAttempts: {
+              mediaErrorDecode: 5,
+              mediaErrorNetwork: 5,
+            },
+          },
         });
       } catch {}
       dashPlayer.on("error", (e: any) => {
