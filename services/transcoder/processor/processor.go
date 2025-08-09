@@ -134,10 +134,22 @@ func Process(
 		u.Concurrency = 5
 	})
 
+	var failedRenditions []string
 	for _, r := range renditions {
 		if err := processSingleRendition(ctx, uploader, bucketName, localVideoPath, transcodedPrefix, request.VideoId, r, stagingDir, logger); err != nil {
-			return fmt.Errorf("rendition %s: %w", r.Name, err)
+			logger.Error("rendition failed, continuing with others", zap.String("rendition", r.Name), zap.Error(err))
+			failedRenditions = append(failedRenditions, r.Name)
+			continue
 		}
+		logger.Info("rendition completed successfully", zap.String("rendition", r.Name))
+	}
+	
+	if len(failedRenditions) == len(renditions) {
+		return fmt.Errorf("all renditions failed: %v", failedRenditions)
+	}
+	
+	if len(failedRenditions) > 0 {
+		logger.Warn("some renditions failed", zap.Strings("failed", failedRenditions))
 	}
 
 	return nil
@@ -324,8 +336,8 @@ func argBuilder(r renditionSpec, segDir, inputVideoPath string) []string {
         "-f", "hls",
         "-hls_segment_type", "fmp4",
         "-hls_time", "4",
-        "-hls_flags", "independent_segments+single_file", 
-        "-hls_segment_filename", filepath.Join(segDir, "chunk-%05d.m4s"),
+        "-hls_flags", "independent_segments", 
+        "-hls_segment_filename", filepath.Join(segDir, "chunk%05d.m4s"),
         "-hls_fmp4_init_filename", "init.mp4",
 
         // output playlist (will be ignored, we only want the segments)

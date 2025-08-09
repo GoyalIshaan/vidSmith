@@ -310,13 +310,17 @@ func Process(
 	masterKey := path.Join(packagedPrefix, videoID, "hls", "master.m3u8")
 	mpdKey := path.Join(packagedPrefix, videoID, "dash", "master.mpd")
 
+	var availableRenditions []renditionSpec
 	for _, r := range renditions {
 		keys, plBytes, err := buildRenditionPlaylist(ctx, s3Client, bucket, transcodedPrefix, videoID, r, cdnBaseURL)
 		if err != nil {
-			return fmt.Errorf("rendition %s: %w", r.Name, err)
+			log.Warn("skipping missing rendition", zap.String("rendition", r.Name), zap.Error(err))
+			continue
 		}
     
 		renditionSegments[r.Name] = keys
+		availableRenditions = append(availableRenditions, r)
+		
 		hlsKey := path.Join(packagedPrefix, videoID, "hls", r.Name+".m3u8")
 		if _, err := uploader.UploadWithContext(ctx, &s3manager.UploadInput{
 			Bucket:       aws.String(bucket),
@@ -330,8 +334,14 @@ func Process(
 
 		log.Info("uploaded rendition playlist", zap.String("key", hlsKey))
 	}
+	
+	if len(availableRenditions) == 0 {
+		return fmt.Errorf("no renditions available for packaging")
+	}
+	
+	log.Info("packaging with available renditions", zap.Int("count", len(availableRenditions)))
 
-	masterBytes, err := buildMasterPlaylist(renditions)
+	masterBytes, err := buildMasterPlaylist(availableRenditions)
 	if err != nil {
 		return fmt.Errorf("master m3u8: %w", err)
 	}
@@ -347,8 +357,8 @@ func Process(
 	}
 	log.Info("uploaded master.m3u8", zap.String("key", masterKey))
 
-	// 3) Parse codec information from first rendition's init.mp4
-	firstRendition := renditions[0]
+	// 3) Parse codec information from first available rendition's init.mp4
+	firstRendition := availableRenditions[0]
 	initKey := path.Join(transcodedPrefix, videoID, firstRendition.Name, "init.mp4")
 	var codecInfo *CodecInfo
 	codecInfo, err = parseCodecsFromInit(ctx, s3Client, bucket, initKey)
@@ -366,7 +376,7 @@ func Process(
 		zap.Int("sampleRate", codecInfo.AudioSampleRate))
 
 	// 4) Build DASH MPD with parsed codec information
-	mpdBytes, err := buildMPD(videoID, transcodedPrefix, renditionSegments, cdnBaseURL, codecInfo)
+	mpdBytes, err := buildMPD(videoID, transcodedPrefix, renditionSegments, cdnBaseURL, codecInfo, availableRenditions)
 	if err != nil {
 		return fmt.Errorf("build MPD: %w", err)
 	}
@@ -404,6 +414,7 @@ func buildRenditionPlaylist(
         for _, obj := range p.Contents {
             k := aws.StringValue(obj.Key)
             lk := strings.ToLower(k)
+
             if strings.HasSuffix(lk, "init.mp4") { hasInit = true; continue }
             if strings.HasSuffix(lk, ".m4s")     { segKeys = append(segKeys, k) }
         }
@@ -450,7 +461,7 @@ func buildMasterPlaylist(rends []renditionSpec) ([]byte, error) {
 }
 
 
-func buildMPD(videoID, transcodedPrefix string, segments map[string][]string, cdnBaseURL string, codecInfo *CodecInfo) ([]byte, error) {
+func buildMPD(videoID, transcodedPrefix string, segments map[string][]string, cdnBaseURL string, codecInfo *CodecInfo, availableRenditions []renditionSpec) ([]byte, error) {
     cdn := strings.TrimRight(cdnBaseURL, "/")
     maxN := 0
     for _, v := range segments { if len(v) > maxN { maxN = len(v) } }
@@ -463,7 +474,7 @@ func buildMPD(videoID, transcodedPrefix string, segments map[string][]string, cd
     
     // Video adaptation set
     fmt.Fprintln(&b, `<AdaptationSet mimeType="video/mp4" segmentAlignment="true" startWithSAP="1" contentType="video">`)
-    for _, r := range renditions {
+    for _, r := range availableRenditions {
         segs := segments[r.Name]
         if len(segs) == 0 { continue }
         sortByChunkNumber(segs)
@@ -491,8 +502,8 @@ func buildMPD(videoID, transcodedPrefix string, segments map[string][]string, cd
     
     // Audio adaptation set
     fmt.Fprintln(&b, `<AdaptationSet mimeType="audio/mp4" segmentAlignment="true" contentType="audio">`)
-    // Use first rendition for audio segments (all should have same audio)
-    firstRendition := renditions[0]
+    // Use first available rendition for audio segments (all should have same audio)
+    firstRendition := availableRenditions[0]
     segs := segments[firstRendition.Name]
     if len(segs) > 0 {
         fmt.Fprintf(&b, `<Representation id="audio" bandwidth="128000" audioSamplingRate="%d" codecs="%s">`+"\n", codecInfo.AudioSampleRate, codecInfo.AudioCodec)
@@ -526,7 +537,7 @@ func sortByChunkNumber(keys []string) {
 	})
 }
 
-var chunkNumRe = regexp.MustCompile(`chunk-(\d+)\.m4s$`)
+var chunkNumRe = regexp.MustCompile(`chunk(\d+)\.m4s$`)
 
 func extractChunkNumber(key string) int {
     m := chunkNumRe.FindStringSubmatch(strings.ToLower(key))
