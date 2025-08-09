@@ -248,10 +248,10 @@ func createBasicDashMPD(outputDir string, availableRenditions []renditionSpec, c
 	
 	var b strings.Builder
 	
-	// Basic MPD header
+	// Basic MPD header with proper DASH-264 profile
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>`)
 	b.WriteString("\n")
-	b.WriteString(`<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT32S" minBufferTime="PT4S" profiles="urn:mpeg:dash:profile:isoff-main:2011">`)
+	b.WriteString(`<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT32S" minBufferTime="PT4S" profiles="urn:mpeg:dash:profile:isoff-live:2011">`)
 	b.WriteString("\n")
 	b.WriteString("  <Period>\n")
 	
@@ -294,7 +294,7 @@ func createBasicDashMPD(outputDir string, availableRenditions []renditionSpec, c
 	// Use first rendition for audio
 	if len(availableRenditions) > 0 {
 		r := availableRenditions[0]
-		b.WriteString(`      <Representation id="audio" bandwidth="128000" audioSamplingRate="48000" codecs="mp4a.40.2">`)
+		b.WriteString(`      <Representation id="audio" bandwidth="128000" audioSamplingRate="48000" codecs="mp4a.40">`)
 		b.WriteString("\n")
 		b.WriteString(`        <AudioChannelConfiguration schemeIdUri="urn:mpeg:dash:23003:3:audio_channel_configuration:2011" value="2"/>`)
 		b.WriteString("\n")

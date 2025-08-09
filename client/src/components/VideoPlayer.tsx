@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
-import * as dashjs from "dashjs";
+import Hls from "hls.js";
 
 interface VideoPlayerProps {
   videoId: string;
-  onReady?: (player: dashjs.MediaPlayerClass | HTMLVideoElement) => void;
+  onReady?: (player: HTMLVideoElement) => void;
   className?: string /** Enable verbose console logs */;
   debug?: boolean;
 }
@@ -32,18 +32,18 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   debug = true,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const playerRef = useRef<dashjs.MediaPlayerClass | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [strategy, setStrategy] = useState<"native-hls" | "dash-js" | "">("");
+  const [strategy, setStrategy] = useState<"native-hls" | "hls-js" | "">("");
 
   // -------- URLs --------
   const getStreamingUrls = useCallback(() => {
     const CDN_BASE_URL =
-      (import.meta as any).env?.VITE_CDN_BASE_URL ||
-      "https://d25gw4hj3q83sd.cloudfront.net";
+      (import.meta as ImportMeta & { env?: Record<string, string> }).env
+        ?.VITE_CDN_BASE_URL || "https://d25gw4hj3q83sd.cloudfront.net";
     const PACKAGED_PREFIX =
-      (import.meta as any).env?.VITE_PACKAGED_PREFIX || "packaged";
+      (import.meta as ImportMeta & { env?: Record<string, string> }).env
+        ?.VITE_PACKAGED_PREFIX || "manifests";
     const base = CDN_BASE_URL.replace(/\/$/, "");
     return {
       hls: `${base}/${PACKAGED_PREFIX}/${videoId}/hls/master.m3u8`,
@@ -52,17 +52,22 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   }, [videoId]);
 
   // -------- Helpers --------
-  const log = (...args: any[]) =>
-    debug && console.log("[VideoPlayer]", ...args);
-  const warn = (...args: any[]) =>
-    debug && console.warn("[VideoPlayer]", ...args);
-  const err = (...args: any[]) => console.error("[VideoPlayer]", ...args);
+  const log = useCallback(
+    (...args: unknown[]) => debug && console.log("[VideoPlayer]", ...args),
+    [debug]
+  );
+  const warn = useCallback(
+    (...args: unknown[]) => debug && console.warn("[VideoPlayer]", ...args),
+    [debug]
+  );
+  const err = useCallback(
+    (...args: unknown[]) => console.error("[VideoPlayer]", ...args),
+    []
+  );
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-
-    let destroyed = false;
 
     // Common listeners for UX/debug
     const onLoadStart = () => {
@@ -87,7 +92,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     };
     const onStalled = () => warn("stalled");
     const onError = () => {
-      const ve = (video as any).error;
+      const ve = video.error;
       err("HTMLVideo error", {
         code: ve?.code,
         message: ve?.message,
@@ -125,40 +130,37 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       onReady?.(video);
     };
 
-    const playDashJs = async () => {
-      setStrategy("dash-js");
-      log("strategy: dash-js", urls.dash);
-      const dashPlayer = dashjs.MediaPlayer().create();
-      playerRef.current = dashPlayer;
-      dashPlayer.initialize(video, urls.dash, false);
-      try {
-        dashPlayer.updateSettings({
-          debug: {
-            logLevel: debug
-              ? dashjs.Debug.LOG_LEVEL_DEBUG
-              : dashjs.Debug.LOG_LEVEL_NONE,
-          },
-          streaming: {
-            retryAttempts: {
-              MPD: 3,
-            },
-            retryIntervals: {
-              MPD: 500,
-            },
-            abandonLoadTimeout: 10000,
-            wallclockTimeUpdateInterval: 50,
-            manifestUpdateRetryInterval: 100,
-          },
+    const playHlsJs = async () => {
+      setStrategy("hls-js");
+      log("strategy: hls-js", urls.hls);
+
+      if (Hls.isSupported()) {
+        const hls = new Hls({
+          debug: debug,
+          enableWorker: true,
+          lowLatencyMode: false,
         });
-      } catch (e) {
-        warn("DASH settings update failed", e);
+
+        hls.loadSource(urls.hls);
+        hls.attachMedia(video);
+
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          log("HLS manifest parsed successfully");
+        });
+
+        hls.on(Hls.Events.ERROR, (event, data) => {
+          err("HLS.js error", { event, data });
+          if (data.fatal) {
+            setError(`HLS error: ${data.type} ${data.details}`);
+            setIsLoading(false);
+          }
+        });
+
+        onReady?.(video);
+      } else {
+        // Fallback to native HLS
+        await playNativeHls();
       }
-      dashPlayer.on("error", (e: any) => {
-        err("dash.js", e);
-        setError(`DASH error${e?.error ? `: ${e.error}` : ""}`);
-        setIsLoading(false);
-      });
-      onReady?.(dashPlayer);
     };
 
     // Primary choice
@@ -169,27 +171,17 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       const native = platformDetection.supportsNativeHLS();
 
       if (apple && native) {
+        // Safari: use native HLS
         await playNativeHls();
       } else {
-        await playDashJs();
+        // Chrome/Firefox: use hls.js for better compatibility
+        await playHlsJs();
       }
     };
 
     start();
 
     return () => {
-      destroyed = true;
-      try {
-        const p = playerRef.current;
-        if (p && typeof (p as any).reset === "function") {
-          (p as any).reset();
-        }
-      } catch (e) {
-        warn("cleanup error", e);
-      } finally {
-        playerRef.current = null;
-      }
-
       video.removeEventListener("loadstart", onLoadStart);
       video.removeEventListener("canplay", onCanPlay);
       video.removeEventListener("loadedmetadata", onLoadedMetadata);
@@ -198,7 +190,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       video.removeEventListener("stalled", onStalled);
       video.removeEventListener("error", onError);
     };
-  }, [videoId, onReady, getStreamingUrls, debug]);
+  }, [videoId, onReady, getStreamingUrls, debug, log, warn, err]);
 
   return (
     <div className={`relative ${className}`}>
