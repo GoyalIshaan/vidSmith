@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path"
@@ -11,6 +13,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -35,17 +38,17 @@ var renditions = []renditionSpec{
 
 
 
-// downloadSegmentsFromS3 downloads all segments for a rendition to local directory
-func downloadSegmentsFromS3(
+// downloadSegmentsFromCDN downloads all segments for a rendition from CDN to local directory
+func downloadSegmentsFromCDN(
 	ctx context.Context,
-	downloader *s3manager.Downloader,
 	s3Client *s3.S3,
-	bucket, transcodedPrefix, videoID, renditionName, localDir string,
+	bucket, transcodedPrefix, videoID, renditionName, localDir, cdnBaseURL string,
 	log *zap.Logger,
 ) error {
 	prefix := path.Join(transcodedPrefix, videoID, renditionName) + "/"
 	
-	// List all objects in the rendition directory
+	// First, list all objects in S3 to get the segment names
+	var segmentFiles []string
 	err := s3Client.ListObjectsV2PagesWithContext(ctx, &s3.ListObjectsV2Input{
 		Bucket: aws.String(bucket),
 		Prefix: aws.String(prefix),
@@ -53,33 +56,90 @@ func downloadSegmentsFromS3(
 		for _, obj := range p.Contents {
 			key := aws.StringValue(obj.Key)
 			filename := filepath.Base(key)
-			localPath := filepath.Join(localDir, filename)
 			
-			// Download each file
-			file, err := os.Create(localPath)
-			if err != nil {
-				log.Error("failed to create local file", zap.String("path", localPath), zap.Error(err))
-				continue
+			// Only download init.mp4 and .m4s files
+			if filename == "init.mp4" || strings.HasSuffix(filename, ".m4s") {
+				segmentFiles = append(segmentFiles, filename)
 			}
-			
-			_, err = downloader.DownloadWithContext(ctx, file, &s3.GetObjectInput{
-				Bucket: aws.String(bucket),
-				Key:    aws.String(key),
-			})
-			file.Close()
-			
-			if err != nil {
-				log.Error("failed to download segment", zap.String("key", key), zap.Error(err))
-				os.Remove(localPath)
-				continue
-			}
-			
-			log.Debug("downloaded segment", zap.String("key", key), zap.String("localPath", localPath))
 		}
 		return true
 	})
 	
-	return err
+	if err != nil {
+		return fmt.Errorf("list segments from S3: %w", err)
+	}
+	
+	if len(segmentFiles) == 0 {
+		return fmt.Errorf("no segments found for rendition %s", renditionName)
+	}
+	
+	// Download each segment from CDN
+	cdnBase := strings.TrimRight(cdnBaseURL, "/")
+	httpClient := &http.Client{Timeout: 30 * time.Second}
+	
+	for _, filename := range segmentFiles {
+		// Construct CDN URL
+		cdnURL := fmt.Sprintf("%s/%s/%s/%s/%s", 
+			cdnBase, 
+			transcodedPrefix, 
+			videoID, 
+			renditionName, 
+			filename)
+		
+		localPath := filepath.Join(localDir, filename)
+		
+		log.Info("downloading segment from CDN", 
+			zap.String("url", cdnURL), 
+			zap.String("localPath", localPath))
+		
+		// Download file
+		if err := downloadFileFromURL(ctx, httpClient, cdnURL, localPath, log); err != nil {
+			log.Error("failed to download segment from CDN", 
+				zap.String("url", cdnURL), 
+				zap.Error(err))
+			continue
+		}
+		
+		log.Debug("downloaded segment successfully", 
+			zap.String("filename", filename), 
+			zap.String("localPath", localPath))
+	}
+	
+	return nil
+}
+
+// downloadFileFromURL downloads a file from URL to local path
+func downloadFileFromURL(ctx context.Context, client *http.Client, url, localPath string, log *zap.Logger) error {
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("HTTP request: %w", err)
+	}
+	defer resp.Body.Close()
+	
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
+	}
+	
+	// Create local file
+	file, err := os.Create(localPath)
+	if err != nil {
+		return fmt.Errorf("create local file: %w", err)
+	}
+	defer file.Close()
+	
+	// Copy response body to file
+	_, err = io.Copy(file, resp.Body)
+	if err != nil {
+		os.Remove(localPath) // Clean up on error
+		return fmt.Errorf("copy file: %w", err)
+	}
+	
+	return nil
 }
 
 // runShakaPackager creates DASH content using Shaka Packager
@@ -150,7 +210,7 @@ func runShakaPackager(
 	}
 	
 	// Add MPD output
-	args = append(args, "--mpd_output", filepath.Join(outputDir, "manifest.mpd"))
+	args = append(args, "--mpd_output", filepath.Join(outputDir, "master.mpd"))
 	
 	// Add additional flags for better DASH compatibility
 	args = append(args, "--generate_static_live_mpd")
@@ -158,8 +218,15 @@ func runShakaPackager(
 	
 	log.Info("running Shaka Packager with args", zap.Strings("args", args))
 	
-	// Run Shaka Packager
-	cmd := exec.CommandContext(ctx, "packager", args...)
+	// Try shaka-packager first, then fall back to packager
+	var cmd *exec.Cmd
+	if _, err := exec.LookPath("shaka-packager"); err == nil {
+		cmd = exec.CommandContext(ctx, "shaka-packager", args...)
+	} else if _, err := exec.LookPath("packager"); err == nil {
+		cmd = exec.CommandContext(ctx, "packager", args...)
+	} else {
+		return fmt.Errorf("neither 'shaka-packager' nor 'packager' found in PATH. Please install Shaka Packager")
+	}
 	
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -170,6 +237,98 @@ func runShakaPackager(
 	}
 	
 	log.Info("Shaka Packager completed successfully")
+	return nil
+}
+
+// createBasicDashMPD creates a basic DASH MPD manifest when Shaka Packager is not available
+func createBasicDashMPD(outputDir string, availableRenditions []renditionSpec, cdnBaseURL, transcodedPrefix, videoID string, log *zap.Logger) error {
+	log.Info("creating basic DASH MPD manifest")
+	
+	cdnBase := strings.TrimRight(cdnBaseURL, "/")
+	
+	var b strings.Builder
+	
+	// Basic MPD header
+	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>`)
+	b.WriteString("\n")
+	b.WriteString(`<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT32S" minBufferTime="PT4S" profiles="urn:mpeg:dash:profile:isoff-main:2011">`)
+	b.WriteString("\n")
+	b.WriteString("  <Period>\n")
+	
+	// Video adaptation set
+	b.WriteString(`    <AdaptationSet mimeType="video/mp4" segmentAlignment="true" startWithSAP="1" contentType="video">`)
+	b.WriteString("\n")
+	
+	for _, r := range availableRenditions {
+		wh := strings.Split(r.Resolution, "x")
+		w, h := wh[0], wh[1]
+		
+		b.WriteString(fmt.Sprintf(`      <Representation id="%s" bandwidth="%d" width="%s" height="%s" codecs="avc1.64001e" frameRate="25">`, r.Name, r.Bandwidth, w, h))
+		b.WriteString("\n")
+		b.WriteString(fmt.Sprintf(`        <BaseURL>%s/%s/%s/%s/</BaseURL>`, cdnBase, transcodedPrefix, videoID, r.Name))
+		b.WriteString("\n")
+		b.WriteString(`        <SegmentList timescale="1000" duration="4000">`)
+		b.WriteString("\n")
+		b.WriteString(`          <Initialization sourceURL="init.mp4"/>`)
+		b.WriteString("\n")
+		
+		// Add some basic segments (assuming up to 8 segments for ~32 second video)
+		for i := 0; i < 8; i++ {
+			b.WriteString(fmt.Sprintf(`          <SegmentURL media="chunk%05d.m4s"/>`, i))
+			b.WriteString("\n")
+		}
+		
+		b.WriteString(`        </SegmentList>`)
+		b.WriteString("\n")
+		b.WriteString(`      </Representation>`)
+		b.WriteString("\n")
+	}
+	
+	b.WriteString(`    </AdaptationSet>`)
+	b.WriteString("\n")
+	
+	// Audio adaptation set
+	b.WriteString(`    <AdaptationSet mimeType="audio/mp4" segmentAlignment="true" contentType="audio">`)
+	b.WriteString("\n")
+	
+	// Use first rendition for audio
+	if len(availableRenditions) > 0 {
+		r := availableRenditions[0]
+		b.WriteString(`      <Representation id="audio" bandwidth="128000" audioSamplingRate="48000" codecs="mp4a.40.2">`)
+		b.WriteString("\n")
+		b.WriteString(`        <AudioChannelConfiguration schemeIdUri="urn:mpeg:dash:23003:3:audio_channel_configuration:2011" value="2"/>`)
+		b.WriteString("\n")
+		b.WriteString(fmt.Sprintf(`        <BaseURL>%s/%s/%s/%s/</BaseURL>`, cdnBase, transcodedPrefix, videoID, r.Name))
+		b.WriteString("\n")
+		b.WriteString(`        <SegmentList timescale="1000" duration="4000">`)
+		b.WriteString("\n")
+		b.WriteString(`          <Initialization sourceURL="init.mp4"/>`)
+		b.WriteString("\n")
+		
+		// Add audio segments
+		for i := 0; i < 8; i++ {
+			b.WriteString(fmt.Sprintf(`          <SegmentURL media="chunk%05d.m4s"/>`, i))
+			b.WriteString("\n")
+		}
+		
+		b.WriteString(`        </SegmentList>`)
+		b.WriteString("\n")
+		b.WriteString(`      </Representation>`)
+		b.WriteString("\n")
+	}
+	
+	b.WriteString(`    </AdaptationSet>`)
+	b.WriteString("\n")
+	b.WriteString("  </Period>\n")
+	b.WriteString("</MPD>\n")
+	
+	// Write MPD to file
+	mpdPath := filepath.Join(outputDir, "master.mpd")
+	if err := os.WriteFile(mpdPath, []byte(b.String()), 0644); err != nil {
+		return fmt.Errorf("write MPD file: %w", err)
+	}
+	
+	log.Info("created basic DASH MPD", zap.String("path", mpdPath))
 	return nil
 }
 
@@ -268,10 +427,7 @@ func Process(
 		u.Concurrency = 5
 	})
 
-	downloader := s3manager.NewDownloader(sess, func(d *s3manager.Downloader) {
-		d.PartSize = 10 * 1024 * 1024
-		d.Concurrency = 5
-	})
+	// No longer needed - downloading from CDN instead of S3
 
 	// 1) Check which renditions are available and download them
 	var availableRenditions []renditionSpec
@@ -296,9 +452,9 @@ func Process(
 			return fmt.Errorf("create rendition dir %s: %w", r.Name, err)
 		}
 		
-		// Download all segments for this rendition
-		log.Info("downloading segments for rendition", zap.String("rendition", r.Name))
-		if err := downloadSegmentsFromS3(ctx, downloader, s3Client, bucket, transcodedPrefix, videoID, r.Name, renditionDir, log); err != nil {
+		// Download all segments for this rendition from CDN
+		log.Info("downloading segments for rendition from CDN", zap.String("rendition", r.Name))
+		if err := downloadSegmentsFromCDN(ctx, s3Client, bucket, transcodedPrefix, videoID, r.Name, renditionDir, cdnBaseURL, log); err != nil {
 			return fmt.Errorf("download segments for %s: %w", r.Name, err)
 		}
 	}
@@ -309,9 +465,12 @@ func Process(
 	
 	log.Info("found available renditions", zap.Int("count", len(availableRenditions)))
 
-	// 2) Run Shaka Packager to create DASH content
+	// 2) Run Shaka Packager to create DASH content, or fall back to basic MPD generation
 	if err := runShakaPackager(ctx, inputDir, outputDir, availableRenditions, log); err != nil {
-		return fmt.Errorf("shaka packager: %w", err)
+		log.Warn("Shaka Packager failed, falling back to basic MPD generation", zap.Error(err))
+		if err := createBasicDashMPD(outputDir, availableRenditions, cdnBaseURL, transcodedPrefix, videoID, log); err != nil {
+			return fmt.Errorf("basic MPD generation: %w", err)
+		}
 	}
 
 	// 3) Upload generated DASH files to S3

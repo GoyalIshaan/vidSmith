@@ -43,7 +43,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       (import.meta as any).env?.VITE_CDN_BASE_URL ||
       "https://d25gw4hj3q83sd.cloudfront.net";
     const PACKAGED_PREFIX =
-      (import.meta as any).env?.VITE_PACKAGED_PREFIX || "manifests";
+      (import.meta as any).env?.VITE_PACKAGED_PREFIX || "packaged";
     const base = CDN_BASE_URL.replace(/\/$/, "");
     return {
       hls: `${base}/${PACKAGED_PREFIX}/${videoId}/hls/master.m3u8`,
