@@ -147,8 +147,7 @@ func buildRenditionPlaylist(
     fmt.Fprintln(&b, "#EXT-X-PLAYLIST-TYPE:VOD")
     fmt.Fprintln(&b, "#EXT-X-INDEPENDENT-SEGMENTS")
     fmt.Fprintln(&b, "#EXT-X-TARGETDURATION:4")
-    fmt.Fprintln(&b, "#EXT-X-MEDIA-SEQUENCE:0")
-    // <-- critical for fMP4 playlists
+    fmt.Fprintf(&b, "#EXT-X-MEDIA-SEQUENCE:%d\n", 0)
     fmt.Fprintf(&b, "#EXT-X-MAP:URI=\"%s/%s\"\n", cdn, path.Join(transcodedPrefix, videoID, r.Name, "init.mp4"))
 
     for _, key := range segKeys {
@@ -168,7 +167,7 @@ func buildMasterPlaylist(rends []renditionSpec) ([]byte, error) {
     fmt.Fprintln(&b, "#EXT-X-INDEPENDENT-SEGMENTS")
     for _, r := range rends {
         // libx264 + AAC default; refine if you later set explicit profiles
-        fmt.Fprintf(&b, "#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%s,CODECS=\"avc1.640028,mp4a.40.2\"\n",
+        fmt.Fprintf(&b, "#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%s,CODECS=\"avc1.640028\"\n",
             r.Bandwidth, r.Resolution)
         fmt.Fprintf(&b, "%s.m3u8\n", r.Name)
     }
@@ -178,37 +177,35 @@ func buildMasterPlaylist(rends []renditionSpec) ([]byte, error) {
 
 func buildMPD(videoID, transcodedPrefix string, segments map[string][]string, cdnBaseURL string) ([]byte, error) {
     cdn := strings.TrimRight(cdnBaseURL, "/")
-    // compute max segment count across renditions
     maxN := 0
-    for _, v := range segments {
-        if len(v) > maxN { maxN = len(v) }
-    }
+    for _, v := range segments { if len(v) > maxN { maxN = len(v) } }
     if maxN == 0 { return nil, fmt.Errorf("no segments found for MPD") }
 
     var b bytes.Buffer
     fmt.Fprintf(&b, `<?xml version="1.0" encoding="UTF-8"?>`+"\n")
-    fmt.Fprintf(&b,
-        `<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT%dS" minBufferTime="PT1.5S" profiles="urn:mpeg:dash:profile:isoff-main:2011">`+"\n",
-        maxN*4,
-    )
+    fmt.Fprintf(&b, `<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT%dS" minBufferTime="PT1.5S" profiles="urn:mpeg:dash:profile:isoff-main:2011">`+"\n", maxN*4)
     fmt.Fprintln(&b, `<Period>`)
+    fmt.Fprintln(&b, `<AdaptationSet mimeType="video/mp4" segmentAlignment="true" startWithSAP="1">`)
 
-    // ONE AdaptationSet holding all video reps
-    fmt.Fprintln(&b, `<AdaptationSet mimeType="video/mp4" segmentAlignment="true" startWithSAP="0">`)
     for _, r := range renditions {
-        // skip renditions that didn't produce segments
-        if len(segments[r.Name]) == 0 { continue }
-
+        segs := segments[r.Name]
+        if len(segs) == 0 { continue }
+        sortByChunkNumber(segs)
+        first := extractChunkNumber(path.Base(segs[0]))
         wh := strings.Split(r.Resolution, "x")
         w, h := wh[0], wh[1]
-        fmt.Fprintf(&b,
-            `<Representation id="%s" bandwidth="%d" width="%s" height="%s" codecs="avc1.640028,mp4a.40.2">`+"\n",
-            r.Name, r.Bandwidth, w, h,
-        )
+
+        fmt.Fprintf(&b, `<Representation id="%s" bandwidth="%d" width="%s" height="%s" codecs="avc1.640028">`+"\n", r.Name, r.Bandwidth, w, h)
         fmt.Fprintf(&b, `<BaseURL>%s/%s/</BaseURL>`+"\n", cdn, path.Join(transcodedPrefix, videoID, r.Name))
-        fmt.Fprintln(&b, `<SegmentTemplate initialization="init.mp4" media="chunk-$Number%05d$.m4s" startNumber="0" duration="4" timescale="1"/>`)
+        fmt.Fprintf(&b, `<SegmentList timescale="1" duration="4" startNumber="%d">`+"\n", first)
+        fmt.Fprintln(&b, `<Initialization sourceURL="init.mp4"/>`)
+        for _, k := range segs {
+            fmt.Fprintf(&b, `<SegmentURL media="%s"/>`+"\n", path.Base(k))
+        }
+        fmt.Fprintln(&b, `</SegmentList>`)
         fmt.Fprintln(&b, `</Representation>`)
     }
+
     fmt.Fprintln(&b, `</AdaptationSet>`)
     fmt.Fprintln(&b, `</Period>`)
     fmt.Fprintln(&b, `</MPD>`)
