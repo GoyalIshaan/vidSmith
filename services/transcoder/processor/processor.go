@@ -243,8 +243,11 @@ func uploadChunk(
 
 	ct := mime.TypeByExtension(filepath.Ext(path))
 
+	if strings.HasSuffix(path, ".mp4") {
+		ct = "video/mp4"
+	}
 	if strings.HasSuffix(path, ".m4s") {
-        ct = "video/mp4"
+        ct = "video/iso.segment"
     }
     if ct == "" {
         ct = "application/octet-stream"

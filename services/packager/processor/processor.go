@@ -191,13 +191,19 @@ func buildMPD(videoID, transcodedPrefix string, segments map[string][]string, cd
         segs := segments[r.Name]
         if len(segs) == 0 { continue }
         sortByChunkNumber(segs)
-        first := extractChunkNumber(path.Base(segs[0]))
         wh := strings.Split(r.Resolution, "x")
         w, h := wh[0], wh[1]
 
         fmt.Fprintf(&b, `<Representation id="%s" bandwidth="%d" width="%s" height="%s" codecs="avc1.640028">`+"\n", r.Name, r.Bandwidth, w, h)
         fmt.Fprintf(&b, `<BaseURL>%s/%s/</BaseURL>`+"\n", cdn, path.Join(transcodedPrefix, videoID, r.Name))
-        fmt.Fprintf(&b, `<SegmentList timescale="1" duration="4" startNumber="%d">`+"\n", first)
+        // assume ms timing if your encoder used 1000-timescale
+        ts := 1000
+        segDur := 4000 // 4s in ms
+        startNum := extractChunkNumber(path.Base(segs[0]))
+        if startNum == 0 { startNum = 1 } // avoid 0
+        
+        fmt.Fprintf(&b, `<SegmentList timescale="%d" duration="%d" startNumber="%d">`+"\n", ts, segDur, startNum)
+
         fmt.Fprintln(&b, `<Initialization sourceURL="init.mp4"/>`)
         for _, k := range segs {
             fmt.Fprintf(&b, `<SegmentURL media="%s"/>`+"\n", path.Base(k))
