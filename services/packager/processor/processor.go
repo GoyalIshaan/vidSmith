@@ -484,9 +484,9 @@ func buildMPD(videoID, transcodedPrefix string, segments map[string][]string, cd
         fmt.Fprintf(&b, `<Representation id="%s" bandwidth="%d" width="%s" height="%s" codecs="%s" frameRate="25">`+"\n", r.Name, r.Bandwidth, w, h, codecInfo.VideoCodec)
         fmt.Fprintf(&b, `<BaseURL>%s/%s/</BaseURL>`+"\n", cdn, path.Join(transcodedPrefix, videoID, r.Name))
         
-        // Use proper timescale for DASH (90000 is MPEG standard)
-        ts := 90000
-        segDur := 360000 // 4s in 90kHz timescale (4 * 90000)
+        // Use HLS timescale (1000 Hz) for compatibility with fmp4 segments  
+        ts := 1000
+        segDur := 4000 // 4s in 1kHz timescale (4 * 1000)
         startNum := extractChunkNumber(path.Base(segs[0]))
         if startNum == 0 { startNum = 1 } // avoid 0
         
@@ -500,28 +500,28 @@ func buildMPD(videoID, transcodedPrefix string, segments map[string][]string, cd
     }
     fmt.Fprintln(&b, `</AdaptationSet>`)
     
-    // Audio adaptation set
+    // Audio adaptation set - create separate audio representations for each video rendition
     fmt.Fprintln(&b, `<AdaptationSet mimeType="audio/mp4" segmentAlignment="true" contentType="audio">`)
-    // Use first available rendition for audio segments (all should have same audio)
-    firstRendition := availableRenditions[0]
-    segs := segments[firstRendition.Name]
-    if len(segs) > 0 {
-        fmt.Fprintf(&b, `<Representation id="audio" bandwidth="128000" audioSamplingRate="%d" codecs="%s">`+"\n", codecInfo.AudioSampleRate, codecInfo.AudioCodec)
-        fmt.Fprintf(&b, `<AudioChannelConfiguration schemeIdUri="urn:mpeg:dash:23003:3:audio_channel_configuration:2011" value="2"/>`+"\n")
-        fmt.Fprintf(&b, `<BaseURL>%s/%s/</BaseURL>`+"\n", cdn, path.Join(transcodedPrefix, videoID, firstRendition.Name))
+    for _, r := range availableRenditions {
+        segs := segments[r.Name]
+        if len(segs) > 0 {
+            fmt.Fprintf(&b, `<Representation id="audio_%s" bandwidth="128000" audioSamplingRate="%d" codecs="%s">`+"\n", r.Name, codecInfo.AudioSampleRate, codecInfo.AudioCodec)
+            fmt.Fprintf(&b, `<AudioChannelConfiguration schemeIdUri="urn:mpeg:dash:23003:3:audio_channel_configuration:2011" value="2"/>`+"\n")
+            fmt.Fprintf(&b, `<BaseURL>%s/%s/</BaseURL>`+"\n", cdn, path.Join(transcodedPrefix, videoID, r.Name))
         
-        ts := 90000
-        segDur := 360000 // 4s in 90kHz timescale
-        startNum := extractChunkNumber(path.Base(segs[0]))
-        if startNum == 0 { startNum = 1 }
-        
-        fmt.Fprintf(&b, `<SegmentList timescale="%d" duration="%d" startNumber="%d">`+"\n", ts, segDur, startNum)
-        fmt.Fprintln(&b, `<Initialization sourceURL="init.mp4"/>`)
-        for _, k := range segs {
-            fmt.Fprintf(&b, `<SegmentURL media="%s"/>`+"\n", path.Base(k))
+            ts := 1000
+            segDur := 4000 // 4s in 1kHz timescale
+            startNum := extractChunkNumber(path.Base(segs[0]))
+            if startNum == 0 { startNum = 1 }
+            
+            fmt.Fprintf(&b, `<SegmentList timescale="%d" duration="%d" startNumber="%d">`+"\n", ts, segDur, startNum)
+            fmt.Fprintln(&b, `<Initialization sourceURL="init.mp4"/>`)
+            for _, k := range segs {
+                fmt.Fprintf(&b, `<SegmentURL media="%s"/>`+"\n", path.Base(k))
+            }
+            fmt.Fprintln(&b, `</SegmentList>`)
+            fmt.Fprintln(&b, `</Representation>`)
         }
-        fmt.Fprintln(&b, `</SegmentList>`)
-        fmt.Fprintln(&b, `</Representation>`)
     }
     fmt.Fprintln(&b, `</AdaptationSet>`)
 

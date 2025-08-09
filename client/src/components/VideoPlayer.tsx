@@ -141,24 +141,18 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           streaming: {
             retryAttempts: {
               MPD: 3,
-              XHR: 3,
             },
             retryIntervals: {
               MPD: 500,
-              XHR: 1000,
             },
             abandonLoadTimeout: 10000,
             wallclockTimeUpdateInterval: 50,
             manifestUpdateRetryInterval: 100,
           },
-          errors: {
-            recoverAttempts: {
-              mediaErrorDecode: 5,
-              mediaErrorNetwork: 5,
-            },
-          },
         });
-      } catch {}
+      } catch (e) {
+        warn("DASH settings update failed", e);
+      }
       dashPlayer.on("error", (e: any) => {
         err("dash.js", e);
         setError(`DASH error${e?.error ? `: ${e.error}` : ""}`);
