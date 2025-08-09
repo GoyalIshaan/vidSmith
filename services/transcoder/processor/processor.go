@@ -37,6 +37,34 @@ var renditions = []renditionSpec{
 	{Name: "480p", Scale: "854x480", CRF: "36"},
 }
 
+// getBitrateForRendition returns appropriate max bitrate for each rendition
+func getBitrateForRendition(name string) string {
+	switch name {
+	case "1080p":
+		return "5000k"
+	case "720p":
+		return "3000k"
+	case "480p":
+		return "1200k"
+	default:
+		return "2000k"
+	}
+}
+
+// getBufSizeForRendition returns appropriate buffer size for each rendition
+func getBufSizeForRendition(name string) string {
+	switch name {
+	case "1080p":
+		return "10000k"
+	case "720p":
+		return "6000k"
+	case "480p":
+		return "2400k"
+	default:
+		return "4000k"
+	}
+}
+
 func downloadVideoFromS3(
 	ctx context.Context,
 	downloader *s3manager.Downloader,
@@ -203,8 +231,8 @@ func watchAndUploadSegments(
 		}
 		for _, e := range entries {
 			if e.IsDir() { continue }
-			// Ignore the DASH manifest
-			if e.Name() == "manifest.mpd" { continue }
+			// Ignore the HLS playlist
+			if e.Name() == "ignored.m3u8" { continue }
 			uploadIfReady(e.Name())
 		}
 	}
@@ -280,8 +308,9 @@ func argBuilder(r renditionSpec, segDir, inputVideoPath string) []string {
         // scale
         "-vf", "scale=" + r.Scale,
 
-        // video encode
-        "-c:v", "libx264", "-preset", "medium", "-crf", r.CRF, "-b:v", "0",
+        // video encode with explicit bitrate for DASH compatibility
+        "-c:v", "libx264", "-preset", "medium", "-crf", r.CRF, 
+        "-maxrate", getBitrateForRendition(r.Name), "-bufsize", getBufSizeForRendition(r.Name),
         // Force pixel format for browser compatibility
         "-pix_fmt", "yuv420p",
         // align keyframes to 4s segments
@@ -291,19 +320,16 @@ func argBuilder(r renditionSpec, segDir, inputVideoPath string) []string {
         // audio encode - ensure stereo for compatibility
         "-c:a", "aac", "-b:a", "128k", "-ac", "2",
 
-        // DASH muxer with proper fragmented MP4
-        "-f", "dash",
-        "-seg_duration", "4",
-        "-frag_duration", "1",
-        "-streaming", "1",
-        "-use_template", "1",
-        "-use_timeline", "0",
-        "-init_seg_name", "init.mp4",
-        "-media_seg_name", "chunk-$Number%05d$.m4s",
-        "-adaptation_sets", "id=0,streams=v id=1,streams=a",
+        // Use fragmented MP4 with HLS muxer (more reliable than DASH muxer)
+        "-f", "hls",
+        "-hls_segment_type", "fmp4",
+        "-hls_time", "4",
+        "-hls_flags", "independent_segments+single_file", 
+        "-hls_segment_filename", filepath.Join(segDir, "chunk-%05d.m4s"),
+        "-hls_fmp4_init_filename", "init.mp4",
 
-        // output manifest path
-        filepath.Join(segDir, "manifest.mpd"),
+        // output playlist (will be ignored, we only want the segments)
+        filepath.Join(segDir, "ignored.m3u8"),
     }
 }
 

@@ -6,7 +6,6 @@ import VideoUpload from "./components/VideoUpload";
 import VideoList from "./components/VideoList";
 import VideoDetails from "./components/VideoDetails";
 import DeepDive from "./components/DeepDive";
-import LiveCheck from "./components/LiveCheck";
 
 function App() {
   return (
@@ -30,10 +29,9 @@ function MainPage() {
     <div className="min-h-screen bg-white flex flex-col font-sans">
       <header className="p-8 mx-8">
         <div className="flex justify-between items-center mb-4">
-          <h1 className="text-black text-5xl font-extrabold tracking-wide">
-            🎬 Video Engine
-          </h1>
-          <LiveCheck />
+          <h3 className="text-black text-xl font-extrabold tracking-wide">
+            VidSmith
+          </h3>
         </div>
         <nav className="flex justify-center gap-4 max-w-4xl mx-auto">
           <button
