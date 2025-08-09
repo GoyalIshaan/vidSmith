@@ -3,10 +3,11 @@ package processor
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"fmt"
-	"io"
+	"os"
+	"os/exec"
 	"path"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -24,11 +25,7 @@ type renditionSpec struct {
 	Bandwidth  int    // peak bitrate in bits/sec
 }
 
-type CodecInfo struct {
-	VideoCodec string
-	AudioCodec string
-	AudioSampleRate int
-}
+// CodecInfo struct removed - using Shaka Packager for codec handling
 
 var renditions = []renditionSpec{
 	{Name: "1080p", Resolution: "1920x1080", Bandwidth: 5000000},
@@ -36,253 +33,203 @@ var renditions = []renditionSpec{
 	{Name: "480p",  Resolution: "854x480",   Bandwidth: 1200000},
 }
 
-// parseCodecsFromInit extracts codec information from init.mp4 by parsing MP4 boxes
-func parseCodecsFromInit(ctx context.Context, s3Client *s3.S3, bucket, initKey string) (*CodecInfo, error) {
-	// Download init.mp4 from S3
-	resp, err := s3Client.GetObjectWithContext(ctx, &s3.GetObjectInput{
+
+
+// downloadSegmentsFromS3 downloads all segments for a rendition to local directory
+func downloadSegmentsFromS3(
+	ctx context.Context,
+	downloader *s3manager.Downloader,
+	s3Client *s3.S3,
+	bucket, transcodedPrefix, videoID, renditionName, localDir string,
+	log *zap.Logger,
+) error {
+	prefix := path.Join(transcodedPrefix, videoID, renditionName) + "/"
+	
+	// List all objects in the rendition directory
+	err := s3Client.ListObjectsV2PagesWithContext(ctx, &s3.ListObjectsV2Input{
 		Bucket: aws.String(bucket),
-		Key:    aws.String(initKey),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("download init.mp4: %w", err)
-	}
-	defer resp.Body.Close()
-
-	// Read the entire init.mp4 into memory (should be small)
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read init.mp4: %w", err)
-	}
-
-	return parseMP4Codecs(data)
-}
-
-// parseMP4Codecs parses MP4 boxes to extract codec information
-func parseMP4Codecs(data []byte) (*CodecInfo, error) {
-	codecs := &CodecInfo{
-		VideoCodec: "avc1.64001e", // fallback
-		AudioCodec: "mp4a.40.2",   // fallback
-		AudioSampleRate: 48000,    // fallback
-	}
-
-	reader := bytes.NewReader(data)
-	
-	for {
-		box, err := readMP4Box(reader)
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return codecs, nil // return fallback on parse errors
-		}
-
-		switch box.Type {
-		case "moov":
-			// Parse movie box for track information
-			if err := parseMovieBox(box.Data, codecs); err == nil {
-				return codecs, nil
+		Prefix: aws.String(prefix),
+	}, func(p *s3.ListObjectsV2Output, last bool) bool {
+		for _, obj := range p.Contents {
+			key := aws.StringValue(obj.Key)
+			filename := filepath.Base(key)
+			localPath := filepath.Join(localDir, filename)
+			
+			// Download each file
+			file, err := os.Create(localPath)
+			if err != nil {
+				log.Error("failed to create local file", zap.String("path", localPath), zap.Error(err))
+				continue
 			}
+			
+			_, err = downloader.DownloadWithContext(ctx, file, &s3.GetObjectInput{
+				Bucket: aws.String(bucket),
+				Key:    aws.String(key),
+			})
+			file.Close()
+			
+			if err != nil {
+				log.Error("failed to download segment", zap.String("key", key), zap.Error(err))
+				os.Remove(localPath)
+				continue
+			}
+			
+			log.Debug("downloaded segment", zap.String("key", key), zap.String("localPath", localPath))
 		}
-	}
-
-	return codecs, nil
-}
-
-type mp4Box struct {
-	Size uint32
-	Type string
-	Data []byte
-}
-
-func readMP4Box(r io.Reader) (*mp4Box, error) {
-	var header [8]byte
-	if _, err := io.ReadFull(r, header[:]); err != nil {
-		return nil, err
-	}
-
-	size := binary.BigEndian.Uint32(header[0:4])
-	boxType := string(header[4:8])
-
-	if size < 8 {
-		return nil, fmt.Errorf("invalid box size: %d", size)
-	}
-
-	dataSize := size - 8
-	data := make([]byte, dataSize)
-	if _, err := io.ReadFull(r, data); err != nil {
-		return nil, err
-	}
-
-	return &mp4Box{
-		Size: size,
-		Type: boxType,
-		Data: data,
-	}, nil
-}
-
-func parseMovieBox(data []byte, codecs *CodecInfo) error {
-	reader := bytes.NewReader(data)
+		return true
+	})
 	
-	for {
-		box, err := readMP4Box(reader)
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return err
-		}
+	return err
+}
 
-		if box.Type == "trak" {
-			parseTrackBox(box.Data, codecs)
+// runShakaPackager creates DASH content using Shaka Packager
+func runShakaPackager(
+	ctx context.Context,
+	inputDir, outputDir string,
+	availableRenditions []renditionSpec,
+	log *zap.Logger,
+) error {
+	log.Info("running Shaka Packager to create DASH content")
+	
+	// Build packager command arguments
+	var args []string
+	
+	// For each rendition, create a complete input specification
+	for _, r := range availableRenditions {
+		renditionDir := filepath.Join(inputDir, r.Name)
+		initFile := filepath.Join(renditionDir, "init.mp4")
+		
+		// Check if init file exists
+		if _, err := os.Stat(initFile); os.IsNotExist(err) {
+			log.Warn("skipping rendition, no init file", zap.String("rendition", r.Name))
+			continue
 		}
+		
+		// Get all segment files for this rendition
+		segmentFiles, err := filepath.Glob(filepath.Join(renditionDir, "chunk*.m4s"))
+		if err != nil || len(segmentFiles) == 0 {
+			log.Warn("no segments found for rendition", zap.String("rendition", r.Name))
+			continue
+		}
+		
+		// Sort segment files to ensure proper order
+		sort.Strings(segmentFiles)
+		
+		// Create input file list for this rendition
+		inputListFile := filepath.Join(inputDir, fmt.Sprintf("%s_input.txt", r.Name))
+		var inputList strings.Builder
+		
+		// Add init segment
+		inputList.WriteString(initFile + "\n")
+		
+		// Add all media segments
+		for _, segFile := range segmentFiles {
+			inputList.WriteString(segFile + "\n")
+		}
+		
+		// Write input list to file
+		if err := os.WriteFile(inputListFile, []byte(inputList.String()), 0644); err != nil {
+			return fmt.Errorf("write input list for %s: %w", r.Name, err)
+		}
+		
+		// Video output specification
+		videoOutput := fmt.Sprintf("in=%s,stream=video,output=%s,playlist_name=%s_video.m3u8",
+			inputListFile,
+			filepath.Join(outputDir, fmt.Sprintf("%s_video.mp4", r.Name)),
+			r.Name,
+		)
+		args = append(args, videoOutput)
+		
+		// Audio output specification
+		audioOutput := fmt.Sprintf("in=%s,stream=audio,output=%s,playlist_name=%s_audio.m3u8",
+			inputListFile,
+			filepath.Join(outputDir, fmt.Sprintf("%s_audio.mp4", r.Name)),
+			r.Name,
+		)
+		args = append(args, audioOutput)
 	}
 	
+	// Add MPD output
+	args = append(args, "--mpd_output", filepath.Join(outputDir, "manifest.mpd"))
+	
+	// Add additional flags for better DASH compatibility
+	args = append(args, "--generate_static_live_mpd")
+	args = append(args, "--segment_duration", "4")
+	
+	log.Info("running Shaka Packager with args", zap.Strings("args", args))
+	
+	// Run Shaka Packager
+	cmd := exec.CommandContext(ctx, "packager", args...)
+	
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	cmd.Stdout = &stderr
+	
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("shaka packager failed: %w\nOutput: %s", err, stderr.String())
+	}
+	
+	log.Info("Shaka Packager completed successfully")
 	return nil
 }
 
-func parseTrackBox(data []byte, codecs *CodecInfo) {
-	reader := bytes.NewReader(data)
+// uploadDashFiles uploads the generated DASH files to S3
+func uploadDashFiles(
+	ctx context.Context,
+	uploader *s3manager.Uploader,
+	bucket, packagedPrefix, videoID, localDir string,
+	log *zap.Logger,
+) error {
+	log.Info("uploading DASH files to S3")
 	
-	for {
-		box, err := readMP4Box(reader)
+	err := filepath.Walk(localDir, func(localPath string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return err
+		}
+		
+		// Calculate S3 key
+		relPath, err := filepath.Rel(localDir, localPath)
 		if err != nil {
-			break
+			return err
 		}
-
-		if box.Type == "mdia" {
-			parseMediaBox(box.Data, codecs)
-		}
-	}
-}
-
-func parseMediaBox(data []byte, codecs *CodecInfo) {
-	reader := bytes.NewReader(data)
-	
-	for {
-		box, err := readMP4Box(reader)
+		
+		s3Key := path.Join(packagedPrefix, videoID, "dash", relPath)
+		
+		// Open file
+		file, err := os.Open(localPath)
 		if err != nil {
-			break
+			return err
 		}
-
-		switch box.Type {
-		case "mdhd":
-			// Media header - extract timescale/sample rate
-			if len(box.Data) >= 20 {
-				// Skip version and flags (4 bytes), creation/modification time (8 bytes)
-				timescale := binary.BigEndian.Uint32(box.Data[12:16])
-				if timescale > 1000 && timescale <= 48000 {
-					codecs.AudioSampleRate = int(timescale)
-				}
-			}
-		case "minf":
-			parseMediaInfoBox(box.Data, codecs)
+		defer file.Close()
+		
+		// Determine content type
+		var contentType string
+		if strings.HasSuffix(localPath, ".mpd") {
+			contentType = "application/dash+xml"
+		} else if strings.HasSuffix(localPath, ".mp4") {
+			contentType = "video/mp4"
+		} else {
+			contentType = "application/octet-stream"
 		}
-	}
-}
-
-func parseMediaInfoBox(data []byte, codecs *CodecInfo) {
-	reader := bytes.NewReader(data)
-	
-	for {
-		box, err := readMP4Box(reader)
+		
+		// Upload to S3
+		_, err = uploader.UploadWithContext(ctx, &s3manager.UploadInput{
+			Bucket:       aws.String(bucket),
+			Key:          aws.String(s3Key),
+			Body:         file,
+			ContentType:  aws.String(contentType),
+			CacheControl: aws.String("public, max-age=3600"),
+		})
+		
 		if err != nil {
-			break
+			return fmt.Errorf("upload %s: %w", s3Key, err)
 		}
-
-		if box.Type == "stbl" {
-			parseSampleTableBox(box.Data, codecs)
-		}
-	}
-}
-
-func parseSampleTableBox(data []byte, codecs *CodecInfo) {
-	reader := bytes.NewReader(data)
+		
+		log.Info("uploaded DASH file", zap.String("key", s3Key))
+		return nil
+	})
 	
-	for {
-		box, err := readMP4Box(reader)
-		if err != nil {
-			break
-		}
-
-		if box.Type == "stsd" {
-			parseSampleDescriptionBox(box.Data, codecs)
-		}
-	}
-}
-
-func parseSampleDescriptionBox(data []byte, codecs *CodecInfo) {
-	if len(data) < 8 {
-		return
-	}
-
-	reader := bytes.NewReader(data[8:]) // Skip version, flags, and entry count
-	
-	for {
-		box, err := readMP4Box(reader)
-		if err != nil {
-			break
-		}
-
-		switch box.Type {
-		case "avc1", "avc3":
-			// H.264 video
-			if videoCodec := parseAVCCodec(box.Data); videoCodec != "" {
-				codecs.VideoCodec = videoCodec
-			}
-		case "mp4a":
-			// AAC audio
-			if audioCodec := parseAudioCodec(box.Data); audioCodec != "" {
-				codecs.AudioCodec = audioCodec
-			}
-		}
-	}
-}
-
-func parseAVCCodec(data []byte) string {
-	// Look for avcC box within avc1/avc3
-	reader := bytes.NewReader(data[78:]) // Skip visual sample entry fields
-	
-	for {
-		box, err := readMP4Box(reader)
-		if err != nil {
-			break
-		}
-
-		if box.Type == "avcC" && len(box.Data) >= 4 {
-			// Extract profile, profile compatibility, and level
-			profile := box.Data[1]
-			profileCompat := box.Data[2]
-			level := box.Data[3]
-			
-			return fmt.Sprintf("avc1.%02x%02x%02x", profile, profileCompat, level)
-		}
-	}
-	
-	return ""
-}
-
-func parseAudioCodec(data []byte) string {
-	// Look for esds box within mp4a
-	reader := bytes.NewReader(data[28:]) // Skip audio sample entry fields
-	
-	for {
-		box, err := readMP4Box(reader)
-		if err != nil {
-			break
-		}
-
-		if box.Type == "esds" && len(box.Data) >= 5 {
-			// Parse elementary stream descriptor to get audio object type
-			// This is a simplified parser - in practice, ESDS is more complex
-			for i := 0; i < len(box.Data)-1; i++ {
-				if box.Data[i] == 0x40 { // Audio ISO/IEC 14496-3
-					return "mp4a.40.2" // AAC LC
-				}
-			}
-		}
-	}
-	
-	return ""
+	return err
 }
 
 func Process(
@@ -297,30 +244,91 @@ func Process(
 	logger *zap.Logger,
 ) error {
 	log := logger.With(zap.String("videoID", videoID))
-	log.Info("packaging start")
+	log.Info("packaging start with Shaka Packager")
+
+	// Create temporary directories
+	tempDir, err := os.MkdirTemp("", "packager-"+videoID)
+	if err != nil {
+		return fmt.Errorf("create temp dir: %w", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	inputDir := filepath.Join(tempDir, "input")
+	outputDir := filepath.Join(tempDir, "output")
+	
+	if err := os.MkdirAll(inputDir, 0755); err != nil {
+		return fmt.Errorf("create input dir: %w", err)
+	}
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		return fmt.Errorf("create output dir: %w", err)
+	}
 
 	uploader := s3manager.NewUploader(sess, func(u *s3manager.Uploader) {
 		u.PartSize = 10 * 1024 * 1024
 		u.Concurrency = 5
 	})
 
-	renditionSegments := make(map[string][]string)
+	downloader := s3manager.NewDownloader(sess, func(d *s3manager.Downloader) {
+		d.PartSize = 10 * 1024 * 1024
+		d.Concurrency = 5
+	})
 
-
-	masterKey := path.Join(packagedPrefix, videoID, "hls", "master.m3u8")
-	mpdKey := path.Join(packagedPrefix, videoID, "dash", "master.mpd")
-
+	// 1) Check which renditions are available and download them
 	var availableRenditions []renditionSpec
 	for _, r := range renditions {
-		keys, plBytes, err := buildRenditionPlaylist(ctx, s3Client, bucket, transcodedPrefix, videoID, r, cdnBaseURL)
+		// Check if this rendition exists in S3
+		initKey := path.Join(transcodedPrefix, videoID, r.Name, "init.mp4")
+		_, err := s3Client.HeadObjectWithContext(ctx, &s3.HeadObjectInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String(initKey),
+		})
+		
 		if err != nil {
 			log.Warn("skipping missing rendition", zap.String("rendition", r.Name), zap.Error(err))
 			continue
 		}
-    
-		renditionSegments[r.Name] = keys
+		
 		availableRenditions = append(availableRenditions, r)
 		
+		// Create directory for this rendition
+		renditionDir := filepath.Join(inputDir, r.Name)
+		if err := os.MkdirAll(renditionDir, 0755); err != nil {
+			return fmt.Errorf("create rendition dir %s: %w", r.Name, err)
+		}
+		
+		// Download all segments for this rendition
+		log.Info("downloading segments for rendition", zap.String("rendition", r.Name))
+		if err := downloadSegmentsFromS3(ctx, downloader, s3Client, bucket, transcodedPrefix, videoID, r.Name, renditionDir, log); err != nil {
+			return fmt.Errorf("download segments for %s: %w", r.Name, err)
+		}
+	}
+	
+	if len(availableRenditions) == 0 {
+		return fmt.Errorf("no renditions available for packaging")
+	}
+	
+	log.Info("found available renditions", zap.Int("count", len(availableRenditions)))
+
+	// 2) Run Shaka Packager to create DASH content
+	if err := runShakaPackager(ctx, inputDir, outputDir, availableRenditions, log); err != nil {
+		return fmt.Errorf("shaka packager: %w", err)
+	}
+
+	// 3) Upload generated DASH files to S3
+	if err := uploadDashFiles(ctx, uploader, bucket, packagedPrefix, videoID, outputDir, log); err != nil {
+		return fmt.Errorf("upload DASH files: %w", err)
+	}
+
+	// 4) Still generate HLS playlists for compatibility
+	renditionSegments := make(map[string][]string)
+	for _, r := range availableRenditions {
+		keys, plBytes, err := buildRenditionPlaylist(ctx, s3Client, bucket, transcodedPrefix, videoID, r, cdnBaseURL)
+		if err != nil {
+			log.Warn("failed to build HLS playlist", zap.String("rendition", r.Name), zap.Error(err))
+			continue
+		}
+		
+		renditionSegments[r.Name] = keys
 		hlsKey := path.Join(packagedPrefix, videoID, "hls", r.Name+".m3u8")
 		if _, err := uploader.UploadWithContext(ctx, &s3manager.UploadInput{
 			Bucket:       aws.String(bucket),
@@ -329,70 +337,25 @@ func Process(
 			ContentType:  aws.String("application/vnd.apple.mpegurl"),
 			CacheControl: aws.String("public, max-age=3600"),
 		}); err != nil {
-			return fmt.Errorf("upload HLS %s: %w", r.Name, err)
+			log.Warn("failed to upload HLS playlist", zap.String("rendition", r.Name), zap.Error(err))
 		}
-
-		log.Info("uploaded rendition playlist", zap.String("key", hlsKey))
 	}
-	
-	if len(availableRenditions) == 0 {
-		return fmt.Errorf("no renditions available for packaging")
-	}
-	
-	log.Info("packaging with available renditions", zap.Int("count", len(availableRenditions)))
 
+	// Upload HLS master playlist
 	masterBytes, err := buildMasterPlaylist(availableRenditions)
-	if err != nil {
-		return fmt.Errorf("master m3u8: %w", err)
+	if err == nil {
+		masterKey := path.Join(packagedPrefix, videoID, "hls", "master.m3u8")
+		uploader.UploadWithContext(ctx, &s3manager.UploadInput{
+			Bucket:       aws.String(bucket),
+			Key:          aws.String(masterKey),
+			Body:         bytes.NewReader(masterBytes),
+			ContentType:  aws.String("application/vnd.apple.mpegurl"),
+			CacheControl: aws.String("public, max-age=3600"),
+		})
+		log.Info("uploaded HLS master playlist", zap.String("key", masterKey))
 	}
 
-	if _, err := uploader.UploadWithContext(ctx, &s3manager.UploadInput{
-		Bucket:       aws.String(bucket),
-		Key:          aws.String(masterKey),
-		Body:         bytes.NewReader(masterBytes),
-		ContentType:  aws.String("application/vnd.apple.mpegurl"),
-		CacheControl: aws.String("public, max-age=3600"),
-	}); err != nil {
-		return fmt.Errorf("upload master.m3u8: %w", err)
-	}
-	log.Info("uploaded master.m3u8", zap.String("key", masterKey))
-
-	// 3) Parse codec information from first available rendition's init.mp4
-	firstRendition := availableRenditions[0]
-	initKey := path.Join(transcodedPrefix, videoID, firstRendition.Name, "init.mp4")
-	var codecInfo *CodecInfo
-	codecInfo, err = parseCodecsFromInit(ctx, s3Client, bucket, initKey)
-	if err != nil {
-		log.Warn("failed to parse codecs, using defaults", zap.Error(err))
-		codecInfo = &CodecInfo{
-			VideoCodec: "avc1.64001e",
-			AudioCodec: "mp4a.40.2", 
-			AudioSampleRate: 48000,
-		}
-	}
-	log.Info("detected codecs", 
-		zap.String("video", codecInfo.VideoCodec), 
-		zap.String("audio", codecInfo.AudioCodec),
-		zap.Int("sampleRate", codecInfo.AudioSampleRate))
-
-	// 4) Build DASH MPD with parsed codec information
-	mpdBytes, err := buildMPD(videoID, transcodedPrefix, renditionSegments, cdnBaseURL, codecInfo, availableRenditions)
-	if err != nil {
-		return fmt.Errorf("build MPD: %w", err)
-	}
-
-	if _, err := uploader.UploadWithContext(ctx, &s3manager.UploadInput{
-		Bucket:       aws.String(bucket),
-		Key:          aws.String(mpdKey),
-		Body:         bytes.NewReader(mpdBytes),
-		ContentType:  aws.String("application/dash+xml"),
-		CacheControl: aws.String("public, max-age=3600"),
-	}); err != nil {
-		return fmt.Errorf("upload master.mpd: %w", err)
-	}
-	log.Info("uploaded master.mpd", zap.String("key", mpdKey))
-
-	log.Info("packaging complete")
+	log.Info("packaging complete with Shaka Packager")
 	return nil
 }
 
@@ -457,76 +420,6 @@ func buildMasterPlaylist(rends []renditionSpec) ([]byte, error) {
             r.Bandwidth, r.Resolution)
         fmt.Fprintf(&b, "%s.m3u8\n", r.Name)
     }
-    return b.Bytes(), nil
-}
-
-
-func buildMPD(videoID, transcodedPrefix string, segments map[string][]string, cdnBaseURL string, codecInfo *CodecInfo, availableRenditions []renditionSpec) ([]byte, error) {
-    cdn := strings.TrimRight(cdnBaseURL, "/")
-    maxN := 0
-    for _, v := range segments { if len(v) > maxN { maxN = len(v) } }
-    if maxN == 0 { return nil, fmt.Errorf("no segments found for MPD") }
-
-    var b bytes.Buffer
-    fmt.Fprintf(&b, `<?xml version="1.0" encoding="UTF-8"?>`+"\n")
-    fmt.Fprintf(&b, `<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT%dS" minBufferTime="PT4S" profiles="urn:mpeg:dash:profile:isoff-main:2011">`+"\n", maxN*4)
-    fmt.Fprintln(&b, `<Period>`)
-    
-    // Video adaptation set
-    fmt.Fprintln(&b, `<AdaptationSet mimeType="video/mp4" segmentAlignment="true" startWithSAP="1" contentType="video">`)
-    for _, r := range availableRenditions {
-        segs := segments[r.Name]
-        if len(segs) == 0 { continue }
-        sortByChunkNumber(segs)
-        wh := strings.Split(r.Resolution, "x")
-        w, h := wh[0], wh[1]
-
-        fmt.Fprintf(&b, `<Representation id="%s" bandwidth="%d" width="%s" height="%s" codecs="%s" frameRate="25">`+"\n", r.Name, r.Bandwidth, w, h, codecInfo.VideoCodec)
-        fmt.Fprintf(&b, `<BaseURL>%s/%s/</BaseURL>`+"\n", cdn, path.Join(transcodedPrefix, videoID, r.Name))
-        
-        // Use HLS timescale (1000 Hz) for compatibility with fmp4 segments  
-        ts := 1000
-        segDur := 4000 // 4s in 1kHz timescale (4 * 1000)
-        startNum := extractChunkNumber(path.Base(segs[0]))
-        if startNum == 0 { startNum = 1 } // avoid 0
-        
-        fmt.Fprintf(&b, `<SegmentList timescale="%d" duration="%d" startNumber="%d">`+"\n", ts, segDur, startNum)
-        fmt.Fprintln(&b, `<Initialization sourceURL="init.mp4"/>`)
-        for _, k := range segs {
-            fmt.Fprintf(&b, `<SegmentURL media="%s"/>`+"\n", path.Base(k))
-        }
-        fmt.Fprintln(&b, `</SegmentList>`)
-        fmt.Fprintln(&b, `</Representation>`)
-    }
-    fmt.Fprintln(&b, `</AdaptationSet>`)
-    
-    // Audio adaptation set - create separate audio representations for each video rendition
-    fmt.Fprintln(&b, `<AdaptationSet mimeType="audio/mp4" segmentAlignment="true" contentType="audio">`)
-    for _, r := range availableRenditions {
-        segs := segments[r.Name]
-        if len(segs) > 0 {
-            fmt.Fprintf(&b, `<Representation id="audio_%s" bandwidth="128000" audioSamplingRate="%d" codecs="%s">`+"\n", r.Name, codecInfo.AudioSampleRate, codecInfo.AudioCodec)
-            fmt.Fprintf(&b, `<AudioChannelConfiguration schemeIdUri="urn:mpeg:dash:23003:3:audio_channel_configuration:2011" value="2"/>`+"\n")
-            fmt.Fprintf(&b, `<BaseURL>%s/%s/</BaseURL>`+"\n", cdn, path.Join(transcodedPrefix, videoID, r.Name))
-        
-            ts := 1000
-            segDur := 4000 // 4s in 1kHz timescale
-            startNum := extractChunkNumber(path.Base(segs[0]))
-            if startNum == 0 { startNum = 1 }
-            
-            fmt.Fprintf(&b, `<SegmentList timescale="%d" duration="%d" startNumber="%d">`+"\n", ts, segDur, startNum)
-            fmt.Fprintln(&b, `<Initialization sourceURL="init.mp4"/>`)
-            for _, k := range segs {
-                fmt.Fprintf(&b, `<SegmentURL media="%s"/>`+"\n", path.Base(k))
-            }
-            fmt.Fprintln(&b, `</SegmentList>`)
-            fmt.Fprintln(&b, `</Representation>`)
-        }
-    }
-    fmt.Fprintln(&b, `</AdaptationSet>`)
-
-    fmt.Fprintln(&b, `</Period>`)
-    fmt.Fprintln(&b, `</MPD>`)
     return b.Bytes(), nil
 }
 

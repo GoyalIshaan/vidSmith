@@ -329,8 +329,8 @@ func argBuilder(r renditionSpec, segDir, inputVideoPath string) []string {
         "-sc_threshold", "0", 
         "-force_key_frames", "expr:gte(t,n_forced*4)",
 
-        // audio encode - ensure stereo for compatibility
-        "-c:a", "aac", "-b:a", "128k", "-ac", "2",
+        // audio encode - ensure stereo AAC-LC for maximum compatibility
+        "-c:a", "aac", "-profile:a", "aac_low", "-b:a", "128k", "-ac", "2", "-ar", "48000",
 
         // Use fragmented MP4 with HLS muxer (more reliable than DASH muxer)
         "-f", "hls",
