@@ -41,13 +41,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     const CDN_BASE_URL =
       (import.meta as ImportMeta & { env?: Record<string, string> }).env
         ?.VITE_CDN_BASE_URL || "https://d25gw4hj3q83sd.cloudfront.net";
-    const PACKAGED_PREFIX =
+    const TRANSCODED_PREFIX =
       (import.meta as ImportMeta & { env?: Record<string, string> }).env
-        ?.VITE_PACKAGED_PREFIX || "manifests";
+        ?.VITE_TRANSCODED_PREFIX || "transcoded";
     const base = CDN_BASE_URL.replace(/\/$/, "");
     return {
-      hls: `${base}/${PACKAGED_PREFIX}/${videoId}/hls/master.m3u8`,
-      dash: `${base}/${PACKAGED_PREFIX}/${videoId}/dash/master.mpd`,
+      hls: `${base}/${TRANSCODED_PREFIX}/${videoId}/master.m3u8`,
     };
   }, [videoId]);
 
@@ -139,13 +138,17 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           debug: debug,
           enableWorker: true,
           lowLatencyMode: false,
+          // Optimize for VOD content
+          maxLoadingDelay: 4,
+          maxBufferLength: 30,
+          maxBufferSize: 60 * 1000 * 1000, // 60MB
         });
 
         hls.loadSource(urls.hls);
         hls.attachMedia(video);
 
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          log("HLS manifest parsed successfully");
+          log("HLS manifest parsed successfully", hls.levels);
         });
 
         hls.on(Hls.Events.ERROR, (event, data) => {
@@ -224,7 +227,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       </div>
 
       <div className="mt-2 text-xs text-gray-500 text-center">
-        Adaptive streaming • {strategy || "auto"} •{" "}
+        HLS Adaptive Streaming • {strategy || "auto"} •{" "}
         {platformDetection.isApplePlatform()
           ? "Apple platform"
           : "Cross‑platform"}

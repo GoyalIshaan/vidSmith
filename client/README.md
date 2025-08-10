@@ -8,6 +8,7 @@ A modern React + TypeScript + Vite client for uploading videos using multipart u
 - 📤 **Drag & Drop Interface**: Modern drag-and-drop file upload with visual feedback
 - 📊 **Real-time Progress**: Track upload progress with detailed part-by-part status
 - 📹 **Video Management**: View all uploaded videos with their processing status
+- 🎥 **HLS Video Player**: Adaptive bitrate streaming with automatic quality selection
 - 🎨 **Modern UI**: Beautiful, responsive design with smooth animations
 - 🔄 **GraphQL Integration**: Uses Apollo Client for efficient data fetching
 - 📱 **Mobile Responsive**: Works perfectly on desktop and mobile devices
@@ -18,7 +19,8 @@ A modern React + TypeScript + Vite client for uploading videos using multipart u
 - **TypeScript** - Type safety
 - **Vite** - Fast build tool and dev server
 - **Apollo Client** - GraphQL client
-- **CSS3** - Modern styling with animations
+- **HLS.js** - HTML5 video player with adaptive streaming
+- **Tailwind CSS v4** - Modern utility-first CSS framework
 
 ## Getting Started
 
@@ -79,6 +81,8 @@ And queries:
 
 ## Configuration
 
+### GraphQL Backend
+
 The client is configured to connect to your backend at `http://localhost:3000/graphql`. To change this, update the URI in `src/lib/apollo.ts`:
 
 ```typescript
@@ -87,22 +91,54 @@ const httpLink = createHttpLink({
 });
 ```
 
+### CDN Configuration for Video Streaming
+
+The video player uses HLS.js for adaptive streaming and fetches videos from your CDN. Configure the CDN settings using environment variables:
+
+Create a `.env` file in the client directory:
+
+```bash
+# CloudFront CDN Base URL
+VITE_CDN_BASE_URL=https://your-cloudfront-domain.cloudfront.net
+
+# Transcoded videos prefix path (should match your transcoder output)
+VITE_TRANSCODED_PREFIX=transcoded
+```
+
+**Default values** (if no `.env` file is provided):
+
+- `VITE_CDN_BASE_URL`: `https://d25gw4hj3q83sd.cloudfront.net`
+- `VITE_TRANSCODED_PREFIX`: `transcoded`
+
+**URL Structure**: Videos are served from: `{CDN_BASE_URL}/{TRANSCODED_PREFIX}/{videoId}/master.m3u8`
+
+**Example**: A video with ID `abc123` will be served from:
+`https://your-cloudfront-domain.cloudfront.net/transcoded/abc123/master.m3u8`
+
 ## File Structure
 
 ```
 src/
 ├── components/
-│   ├── VideoUpload.tsx      # Main upload component
-│   ├── VideoUpload.css      # Upload component styles
-│   ├── VideoList.tsx        # Video list component
-│   └── VideoList.css        # Video list styles
+│   ├── VideoPlayer.tsx      # HLS video player with adaptive streaming
+│   ├── FileForm.tsx         # Video upload form component
+│   ├── UploadProgress.tsx   # Upload progress tracking
+│   ├── VideoCard.tsx        # Individual video card component
+│   ├── VideoInfo.tsx        # Video information display
+│   ├── VideoPipeline.tsx    # Processing pipeline status
+│   └── StatusMessage.tsx    # Status message component
+├── pages/
+│   ├── Home.tsx            # Home page with video listing
+│   ├── Upload.tsx          # Upload page
+│   ├── VideoDetails.tsx    # Individual video details
+│   └── About.tsx           # About page
 ├── lib/
 │   ├── apollo.ts           # Apollo Client configuration
 │   └── uploadService.ts    # Upload logic and GraphQL mutations
 ├── types/
 │   └── graphql.ts          # TypeScript types for GraphQL schema
-├── App.tsx                 # Main app component
-└── App.css                 # App styles
+├── App.tsx                 # Main app component with routing
+└── index.css               # Global styles with Tailwind CSS
 ```
 
 ## Development
