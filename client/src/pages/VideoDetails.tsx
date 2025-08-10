@@ -136,7 +136,7 @@ const VideoDetails: React.FC = () => {
           </div>
 
           {/* Video Player */}
-          {video.status >= 2 && (
+          {video.status >= 1 && (
             <div className="bg-white border border-gray-200 rounded-lg p-8 mb-8">
               <div className="mb-4">
                 <h3 className="text-lg font-semibold text-gray-900 mb-2">
@@ -144,8 +144,10 @@ const VideoDetails: React.FC = () => {
                 </h3>
                 <p className="text-sm text-gray-600">
                   {video.status >= 6
-                    ? "Adaptive bitrate streaming with automatic quality selection"
-                    : "Video available for playback (processing may still be ongoing)"}
+                    ? "Processing complete! Enjoy adaptive bitrate streaming with automatic quality selection."
+                    : video.status >= 1
+                    ? "Video is ready for playback! Processing of captions and content review may still be ongoing."
+                    : "Video is being processed..."}
                 </p>
               </div>
               <VideoPlayer

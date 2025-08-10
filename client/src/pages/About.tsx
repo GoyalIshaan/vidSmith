@@ -141,8 +141,9 @@ const About: React.FC = () => {
               🔄 Transcoding & Optimization
             </h3>
             <p className="text-gray-700">
-              FFmpeg-based processing with multiple quality renditions and
-              HLS/DASH manifest generation
+              FFmpeg-based processing with multiple quality renditions (1080p,
+              720p, 480p) and HLS adaptive streaming. Videos are immediately
+              playable after transcoding completes.
             </p>
           </div>
 

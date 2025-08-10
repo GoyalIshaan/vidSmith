@@ -12,10 +12,6 @@ const VideoPipeline: React.FC<VideoPipelineProps> = ({ status, videoName }) => {
         return status >= 0 ? "completed" : "pending";
       case "transcoding":
         return status >= 1 ? "completed" : status === 0 ? "active" : "pending";
-      case "packaging":
-        // Packaging happens right after transcoding completes. We treat it as active when status === 1
-        // and completed once captioning has moved the status forward (>= 2)
-        return status >= 2 ? "completed" : status === 1 ? "active" : "pending";
       case "captioning":
         return status >= 2 ? "completed" : status === 1 ? "active" : "pending";
       case "censoring":
@@ -42,23 +38,17 @@ const VideoPipeline: React.FC<VideoPipelineProps> = ({ status, videoName }) => {
           : phaseStatus === "active"
           ? "🔄"
           : "⏳";
-      case "packaging":
-        return phaseStatus === "completed"
-          ? "✅"
-          : phaseStatus === "active"
-          ? "📦"
-          : "⏳";
       case "captioning":
         return phaseStatus === "completed"
           ? "✅"
           : phaseStatus === "active"
-          ? "🔄"
+          ? "💬"
           : "⏳";
       case "censoring":
         return phaseStatus === "completed"
           ? "✅"
           : phaseStatus === "active"
-          ? "🔄"
+          ? "🛡️"
           : "⏳";
       case "done":
         return phaseStatus === "completed" ? "🎉" : "⏳";
@@ -97,11 +87,6 @@ const VideoPipeline: React.FC<VideoPipelineProps> = ({ status, videoName }) => {
       label: "Captioning",
       description: "Generating subtitles",
     },
-    {
-      key: "packaging",
-      label: "Packaging",
-      description: "Preparing manifests",
-    },
     { key: "censoring", label: "Censoring", description: "Content review" },
     { key: "done", label: "Done", description: "Ready to play" },
   ];
@@ -138,12 +123,12 @@ const VideoPipeline: React.FC<VideoPipelineProps> = ({ status, videoName }) => {
             ? "Complete"
             : status === 5
             ? "Processing Final"
-            : status === 3
+            : status === 3 || status === 4
             ? "Censoring"
             : status === 2
             ? "Captioning Done"
             : status === 1
-            ? "Packaging"
+            ? "Transcoding Complete - Video Ready!"
             : status === 0
             ? "Uploaded"
             : "Error"}
