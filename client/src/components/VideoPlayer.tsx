@@ -4,7 +4,7 @@ import Hls from "hls.js";
 interface VideoPlayerProps {
   videoId: string;
   onReady?: (player: HTMLVideoElement) => void;
-  className?: string /** Enable verbose console logs */;
+  className?: string;
   debug?: boolean;
 }
 
@@ -29,7 +29,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   videoId,
   onReady,
   className = "",
-  debug = true,
+  debug = false,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [error, setError] = useState<string | null>(null);

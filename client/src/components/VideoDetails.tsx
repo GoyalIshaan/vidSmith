@@ -235,9 +235,9 @@ const VideoDetails: React.FC = () => {
               videoId={video.id}
               className="w-full"
               onReady={() => {
-                console.log("Video player ready for video:", video.videoName);
+                // Video player ready
               }}
-              debug={true}
+              debug={false}
             />
           </div>
         )}

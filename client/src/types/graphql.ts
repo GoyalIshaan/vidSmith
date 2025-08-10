@@ -10,16 +10,6 @@ export interface Video {
 
 export type VideoStatus = "UPLOADING" | "TRANSCODING" | "READY" | "ERROR";
 
-export interface PresignedUrl {
-  part: number;
-  url: string;
-}
-
-export interface UploadInfo {
-  uploadId: string;
-  presignedUrls: PresignedUrl[];
-}
-
 export interface PartInput {
   ETag: string;
   PartNumber: number;

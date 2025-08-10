@@ -24,14 +24,10 @@ const VideoList: React.FC = () => {
   const [videos, setVideos] = useState<Video[]>([]);
 
   useEffect(() => {
-    console.log("VideoList - GraphQL Response:", { loading, error, data });
     if (data?.videos) {
-      console.log("Setting videos:", data.videos);
       setVideos(data.videos);
-    } else if (data) {
-      console.log("Data exists but no videos property:", data);
     }
-  }, [data, loading, error]);
+  }, [data]);
 
   const getStatusBadgeClass = (status: number) => {
     const baseClasses =
@@ -104,16 +100,11 @@ const VideoList: React.FC = () => {
   };
 
   if (loading) {
-    console.log("VideoList - Still loading...");
     return (
       <div className="max-w-6xl mx-auto p-8">
         <div className="text-center py-12">
           <div className="w-10 h-10 border-4 border-white border-t-red-500 rounded-full animate-spin mx-auto mb-4"></div>
           <p className="text-black text-lg">Loading videos...</p>
-          <p className="text-gray-500 text-sm mt-2">
-            Debug: Loading={loading ? "true" : "false"}, Data=
-            {data ? "exists" : "null"}, Error={error ? "exists" : "none"}
-          </p>
         </div>
       </div>
     );
