@@ -153,7 +153,8 @@ func processSingleRendition(
 		return fmt.Errorf("create rendition directory: %w", err)
 	}
 
-	cmd := exec.CommandContext(ctx, "ffmpeg", argBuilder(r, renditionDir, localVideoPath)...)
+	cmd := exec.CommandContext(ctx, "ffmpeg", argBuilder(r, localVideoPath)...)
+	cmd.Dir=renditionDir
 
 	var stderrBuf bytes.Buffer
 	cmd.Stderr = &stderrBuf
@@ -191,6 +192,14 @@ func processSingleRendition(
 		}
 	}
 
+	initPath := filepath.Join(renditionDir, "init.mp4")
+	if _, err := os.Stat(initPath); err == nil {
+		key := path.Join(transcodedPrefix, videoID, r.Name, "init.mp4")
+		if err := uploadFile(ctx, uploader, bucket, key, initPath, "public, max-age=31536000, immutable", log); err != nil {
+			log.Warn("final init.mp4 upload failed", zap.Error(err))
+		}
+	}
+
 	log.Info("rendition complete")
 	return nil
 }
@@ -212,7 +221,7 @@ func watchAndUploadSegments(
 	defer ticker.Stop()
 
 	upload := func(name string) {
-		if !(name == "init.mp4" || strings.HasSuffix(name, ".m4s")) {
+		if !(strings.HasSuffix(name, ".m4s")) {
 			return
 		}
 		if _, ok := uploaded[name]; ok {
@@ -260,8 +269,8 @@ func watchAndUploadSegments(
 }
 
 
-func argBuilder(r renditionSpec, segDir, inputVideoPath string) []string {
-    playlistPath := filepath.Join(segDir, "index.m3u8")
+func argBuilder(r renditionSpec, inputVideoPath string) []string {
+    playlistPath := "index.m3u8"
 
     return []string{
         "-hide_banner", "-loglevel", "warning",
