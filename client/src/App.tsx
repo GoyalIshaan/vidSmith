@@ -1,11 +1,11 @@
 import { ApolloProvider } from "@apollo/client";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import { client } from "./lib/apollo";
-import VideoUpload from "./components/VideoUpload";
-import VideoDetails from "./components/VideoDetails";
-import DeepDive from "./components/DeepDive";
 import Banner from "./components/Banner";
 import Home from "./pages/Home";
+import Upload from "./pages/Upload";
+import About from "./pages/About";
+import VideoDetails from "./pages/VideoDetails";
 
 function App() {
   return (
@@ -24,7 +24,7 @@ function App() {
             path="/upload"
             element={
               <Layout>
-                <VideoUpload />
+                <Upload />
               </Layout>
             }
           />
@@ -32,7 +32,7 @@ function App() {
             path="/about"
             element={
               <Layout>
-                <DeepDive />
+                <About />
               </Layout>
             }
           />

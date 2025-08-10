@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 
-const DeepDive: React.FC = () => {
+const About: React.FC = () => {
   const [activeSection, setActiveSection] = useState<string>("overview");
 
   const sections = [
@@ -23,7 +23,7 @@ const DeepDive: React.FC = () => {
           transcoding, intelligent captioning, AI-powered content moderation,
           and scalable streaming capabilities.
         </p>
-        
+
         <div className="grid md:grid-cols-2 gap-6">
           <div className="bg-white border border-red-200 rounded-lg p-6">
             <h3 className="text-xl font-semibold text-red-900 mb-3">
@@ -83,7 +83,7 @@ const DeepDive: React.FC = () => {
         <h2 className="text-3xl font-bold text-blue-900 mb-6">
           🏗️ System Architecture
         </h2>
-        
+
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
           <div className="bg-white border border-blue-200 rounded-lg p-6 text-center">
             <div className="text-3xl mb-3">🌐</div>
@@ -124,26 +124,28 @@ const DeepDive: React.FC = () => {
         <h2 className="text-3xl font-bold text-green-900 mb-6">
           ⚡ Video Processing Pipeline
         </h2>
-        
+
         <div className="space-y-4">
           <div className="bg-white border-l-4 border-blue-500 p-6 rounded-r-lg">
             <h3 className="text-xl font-bold text-blue-900 mb-2">
               📤 Upload & Ingestion
             </h3>
             <p className="text-gray-700">
-              Chunked multipart upload to AWS S3 with metadata storage in PostgreSQL
+              Chunked multipart upload to AWS S3 with metadata storage in
+              PostgreSQL
             </p>
           </div>
-          
+
           <div className="bg-white border-l-4 border-purple-500 p-6 rounded-r-lg">
             <h3 className="text-xl font-bold text-purple-900 mb-2">
               🔄 Transcoding & Optimization
             </h3>
             <p className="text-gray-700">
-              FFmpeg-based processing with multiple quality renditions and HLS/DASH manifest generation
+              FFmpeg-based processing with multiple quality renditions and
+              HLS/DASH manifest generation
             </p>
           </div>
-          
+
           <div className="bg-white border-l-4 border-orange-500 p-6 rounded-r-lg">
             <h3 className="text-xl font-bold text-orange-900 mb-2">
               💬 Caption Generation
@@ -152,13 +154,14 @@ const DeepDive: React.FC = () => {
               AWS Transcribe speech-to-text with SRT subtitle file generation
             </p>
           </div>
-          
+
           <div className="bg-white border-l-4 border-red-500 p-6 rounded-r-lg">
             <h3 className="text-xl font-bold text-red-900 mb-2">
               🛡️ Content Moderation
             </h3>
             <p className="text-gray-700">
-              Google Gemini AI analysis for content safety and automated flagging
+              Google Gemini AI analysis for content safety and automated
+              flagging
             </p>
           </div>
         </div>
@@ -172,7 +175,7 @@ const DeepDive: React.FC = () => {
         <h2 className="text-3xl font-bold text-indigo-900 mb-6">
           💻 Technology Stack
         </h2>
-        
+
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
           <div className="bg-white border border-indigo-200 rounded-lg p-6">
             <h3 className="text-xl font-bold text-blue-900 mb-4">
@@ -185,7 +188,7 @@ const DeepDive: React.FC = () => {
               <li>• HLS.js for video streaming</li>
             </ul>
           </div>
-          
+
           <div className="bg-white border border-indigo-200 rounded-lg p-6">
             <h3 className="text-xl font-bold text-green-900 mb-4">
               🔧 Backend
@@ -197,7 +200,7 @@ const DeepDive: React.FC = () => {
               <li>• FFmpeg for transcoding</li>
             </ul>
           </div>
-          
+
           <div className="bg-white border border-indigo-200 rounded-lg p-6">
             <h3 className="text-xl font-bold text-purple-900 mb-4">
               💾 Data & Storage
@@ -230,7 +233,7 @@ const DeepDive: React.FC = () => {
   };
 
   return (
-    <div className="max-w-6xl mx-auto p-8">
+    <div className="w-full max-w-none">
       <div className="text-center mb-8">
         <h1 className="text-4xl font-extrabold text-gray-900 mb-4">
           🔍 Deep Dive: Video Engine
@@ -268,4 +271,4 @@ const DeepDive: React.FC = () => {
   );
 };
 
-export default DeepDive;
+export default About;
