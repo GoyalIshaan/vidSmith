@@ -164,33 +164,7 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery, bucketName strin
 		}
 	}
 	
-	transcodingCompleteEvent := types.TranscodingCompleteEvent{
-		VideoId: req.VideoId,
-	}
-	
-	if emitErr != nil {
-		c.logger.Error("failed to publish updateVideoStatus event after all retries", 
-			zap.Error(emitErr), 
-			zap.String("videoId", req.VideoId))
-	}
 
-	emitErr = nil
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		emitErr = c.emit("transcodingComplete", transcodingCompleteEvent)
-		if emitErr == nil {
-			break // Success, exit retry loop
-		}
-		
-		c.logger.Error("failed to publish transcodingComplete event", 
-			zap.Error(emitErr), 
-			zap.Int("attempt", attempt),
-			zap.Int("maxRetries", maxRetries))
-		
-		if attempt < maxRetries {
-			// Wait before retry (exponential backoff)
-			time.Sleep(time.Duration(attempt) * time.Second)
-		}
-	}
 
 	if emitErr != nil {
 		c.logger.Error("failed to publish transcodingComplete event after all retries", 
