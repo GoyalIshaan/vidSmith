@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"mime"
 	"os"
 	"os/exec"
 	"path"
@@ -26,44 +25,17 @@ type renditionSpec struct {
 	Name       string
 	Scale      string
 	CRF        string // tells ffmpeg to aim for a certain visual quality level
-	Bitrate    string
 	MaxBitrate string
 	BufSize    string
+	Bandwidth  int
 }
 
 var renditions = []renditionSpec{
-	{Name: "1080p", Scale: "1920x1080", CRF: "32"},
-	{Name: "720p", Scale: "1280x720", CRF: "34"},
-	{Name: "480p", Scale: "854x480", CRF: "36"},
+	{Name: "1080p", Scale: "1920x1080", CRF: "32", MaxBitrate: "5000k", BufSize: "10000k", Bandwidth: 5000000},
+	{Name: "720p", Scale: "1280x720", CRF: "34", MaxBitrate: "3000k", BufSize: "6000k", Bandwidth: 3000000},
+	{Name: "480p", Scale: "854x480", CRF: "36", MaxBitrate: "1200k", BufSize: "2400k", Bandwidth: 1200000},
 }
 
-// getBitrateForRendition returns appropriate max bitrate for each rendition
-func getBitrateForRendition(name string) string {
-	switch name {
-	case "1080p":
-		return "5000k"
-	case "720p":
-		return "3000k"
-	case "480p":
-		return "1200k"
-	default:
-		return "2000k"
-	}
-}
-
-// getBufSizeForRendition returns appropriate buffer size for each rendition
-func getBufSizeForRendition(name string) string {
-	switch name {
-	case "1080p":
-		return "10000k"
-	case "720p":
-		return "6000k"
-	case "480p":
-		return "2400k"
-	default:
-		return "4000k"
-	}
-}
 
 func downloadVideoFromS3(
 	ctx context.Context,
@@ -134,22 +106,33 @@ func Process(
 		u.Concurrency = 5
 	})
 
-	var failedRenditions []string
+	var failedRenditions []renditionSpec
+	var successRenditions []renditionSpec
 	for _, r := range renditions {
 		if err := processSingleRendition(ctx, uploader, bucketName, localVideoPath, transcodedPrefix, request.VideoId, r, stagingDir, logger); err != nil {
 			logger.Error("rendition failed, continuing with others", zap.String("rendition", r.Name), zap.Error(err))
-			failedRenditions = append(failedRenditions, r.Name)
+			failedRenditions = append(failedRenditions, r)
 			continue
 		}
 		logger.Info("rendition completed successfully", zap.String("rendition", r.Name))
+		successRenditions = append(successRenditions, r)
 	}
 	
 	if len(failedRenditions) == len(renditions) {
 		return fmt.Errorf("all renditions failed: %v", failedRenditions)
 	}
 	
-	if len(failedRenditions) > 0 {
-		logger.Warn("some renditions failed", zap.Strings("failed", failedRenditions))
+
+	masterPlaylistPath := filepath.Join(stagingDir, "master.m3u8")
+	if err := writeMasterPlaylist(masterPlaylistPath, successRenditions); err != nil {
+		return fmt.Errorf("write master playlist: %w", err)
+	}
+
+	masterS3Key := path.Join(transcodedPrefix, request.VideoId, "master.m3u8")
+	cacheControl := "public, max-age=31536000"
+	
+	if err := uploadFile(ctx, uploader, bucketName, masterS3Key, masterPlaylistPath, cacheControl, logger); err != nil {
+		return fmt.Errorf("upload master playlist: %w", err)
 	}
 
 	return nil
@@ -169,7 +152,6 @@ func processSingleRendition(
 	if err := os.MkdirAll(renditionDir, 0755); err != nil {
 		return fmt.Errorf("create rendition directory: %w", err)
 	}
-	defer os.RemoveAll(renditionDir)
 
 	cmd := exec.CommandContext(ctx, "ffmpeg", argBuilder(r, renditionDir, localVideoPath)...)
 
@@ -201,6 +183,14 @@ func processSingleRendition(
 	close(stop)
 	wg.Wait()
 
+	indexPath := filepath.Join(renditionDir, "index.m3u8")
+	if _, err := os.Stat(indexPath); err == nil {
+		key := path.Join(transcodedPrefix, videoID, r.Name, "index.m3u8")
+		if err := uploadFile(ctx, uploader, bucket, key, indexPath, "public, max-age=31536000", log); err != nil {
+			log.Warn("final index.m3u8 upload failed", zap.Error(err))
+		}
+	}
+
 	log.Info("rendition complete")
 	return nil
 }
@@ -216,23 +206,30 @@ func watchAndUploadSegments(
 ) {
 	defer wg.Done()
 
+	uploaded := make(map[string]struct{})
 
-	t := time.NewTicker(300 * time.Millisecond)
-	defer t.Stop()
+	ticker := time.NewTicker(300 * time.Millisecond)
+	defer ticker.Stop()
 
-	uploadIfReady := func(name string) {
-		// Only care about init.mp4 and *.m4s, ignore manifest.mpd
+	upload := func(name string) {
 		if !(name == "init.mp4" || strings.HasSuffix(name, ".m4s")) {
 			return
 		}
-		pathFS := filepath.Join(dir, name)
+		if _, ok := uploaded[name]; ok {
+			return
+		}
+
+		localPath := filepath.Join(dir, name)
 		
 		s3Key := path.Join(transcodedPrefix, videoID, renditionName, name)
-		var upWG sync.WaitGroup
-		upWG.Add(1)
-		go uploadChunk(uploader, bucket, s3Key, pathFS, log, &upWG, ctx)
-		upWG.Wait() // ensure removal before next tick
-	
+
+		cacheControl := "public, max-age=31536000, immutable"
+		
+		if err := uploadFile(ctx, uploader, bucket, s3Key, localPath, cacheControl, log); err != nil {
+			log.Warn("upload failed", zap.Error(err))
+		} else {
+			uploaded[name] = struct{}{}
+		}
 	}
 
 	scan := func() {
@@ -241,11 +238,9 @@ func watchAndUploadSegments(
 			log.Warn("scan dir failed", zap.Error(err))
 			return
 		}
-		for _, e := range entries {
-			if e.IsDir() { continue }
-			// Ignore the HLS playlist
-			if e.Name() == "ignored.m3u8" { continue }
-			uploadIfReady(e.Name())
+		for _, dirEntry := range entries {
+			if dirEntry.IsDir() { continue }
+			upload(dirEntry.Name())
 		}
 	}
 
@@ -258,90 +253,121 @@ func watchAndUploadSegments(
 				time.Sleep(300 * time.Millisecond)
 			}
 			return
-		case <-t.C:
+		case <-ticker.C:
 			scan()
 		}
 	}
 }
 
 
-func uploadChunk(
-	uploader *s3manager.Uploader,
-	bucket, s3Key, path string,
-	log *zap.Logger,
-	wg *sync.WaitGroup,
-	ctx context.Context,
-) {
-	defer wg.Done()
-
-	file, err := os.Open(path)
-	if err != nil {
-		log.Error("open failed", zap.String("path", path), zap.Error(err))
-		return
-	}
-	defer file.Close()
-
-	ct := mime.TypeByExtension(filepath.Ext(path))
-
-	if strings.HasSuffix(path, ".mp4") {
-		ct = "video/mp4"
-	}
-	if strings.HasSuffix(path, ".m4s") {
-        ct = "video/mp4"
-    }
-    if ct == "" {
-        ct = "application/octet-stream"
-    }
-
-	if _, err := uploader.UploadWithContext(ctx, &s3manager.UploadInput{
-		Bucket: aws.String(bucket),
-		Key: aws.String(s3Key),
-		Body: file,
-		ContentType: aws.String(ct),
-		CacheControl: aws.String("public, max-age=31536000, immutable"),
-	}); err!= nil {
-		log.Error("upload failed", zap.String("key", s3Key), zap.Error(err))
-		return
-	}
-
-	os.Remove(path)
-	log.Info("uploaded", zap.String("key", s3Key))
-}
-
 func argBuilder(r renditionSpec, segDir, inputVideoPath string) []string {
+    playlistPath := filepath.Join(segDir, "index.m3u8")
+
     return []string{
         "-hide_banner", "-loglevel", "warning",
         "-i", inputVideoPath,
 
-        // streams
+        // Map video + optional audio
         "-map", "0:v:0",
         "-map", "0:a:0?",
 
-        // scale
+        // Scaling
         "-vf", "scale=" + r.Scale,
 
-        // video encode with explicit bitrate for DASH compatibility
-        "-c:v", "libx264", "-preset", "medium", "-crf", r.CRF, 
-        "-maxrate", getBitrateForRendition(r.Name), "-bufsize", getBufSizeForRendition(r.Name),
-        // Force pixel format for browser compatibility
+        // Video encoding (H.264) tuned for streaming
+        "-c:v", "libx264",
+        "-preset", "medium",
+        "-crf", r.CRF,
+        "-maxrate", r.MaxBitrate,
+        "-bufsize", r.BufSize,
         "-pix_fmt", "yuv420p",
-        // align keyframes to 4s segments
-        "-sc_threshold", "0", 
+
+        // Keyframe alignment for 4s segments
+        "-sc_threshold", "0",
         "-force_key_frames", "expr:gte(t,n_forced*4)",
 
-        // audio encode - ensure stereo AAC-LC for maximum compatibility
-        "-c:a", "aac", "-profile:a", "aac_low", "-b:a", "128k", "-ac", "2", "-ar", "48000",
+        // Audio encoding (AAC-LC stereo)
+        "-c:a", "aac",
+        "-profile:a", "aac_low",
+        "-b:a", "128k",
+        "-ac", "2",
+        "-ar", "48000",
 
-        // Use fragmented MP4 with HLS muxer (more reliable than DASH muxer)
+        // --- HLS (CMAF/fMP4) output ---
         "-f", "hls",
-        "-hls_segment_type", "fmp4",
-        "-hls_time", "4",
-        "-hls_flags", "independent_segments", 
-        "-hls_segment_filename", filepath.Join(segDir, "chunk%05d.m4s"),
-        "-hls_fmp4_init_filename", "init.mp4",
-
-        // output playlist (will be ignored, we only want the segments)
-        filepath.Join(segDir, "ignored.m3u8"),
+        "-hls_playlist_type", "vod",              // Finalized playlist with #EXT-X-ENDLIST
+        "-hls_time", "4",                         // 4s segments
+        "-hls_flags", "independent_segments+temp_file",     // IDR frame at segment start
+        "-hls_segment_type", "fmp4",              // Fragmented MP4 (CMAF)
+        "-hls_fmp4_init_filename", "init.mp4",    // Will be in same folder as playlist
+        "-hls_segment_filename", "chunk_%05d.m4s",// Relative paths in playlist
+        "-hls_list_size", "0",                    // Keep all segments in VOD
+        playlistPath,                             // Output media playlist
     }
 }
 
+func contentTypeFor(p string) string {
+	ext := strings.ToLower(filepath.Ext(p))
+	switch ext {
+	case ".m3u8":
+		return "application/vnd.apple.mpegurl"
+	case ".m4s":
+		return "video/iso.segment"
+	case ".ts":
+		return "video/mp2t"
+	case ".mp4":
+		return "video/mp4"
+	case ".mpd":
+		return "application/dash+xml"
+	default:
+		return "application/octet-stream"
+	}
+}
+
+func uploadFile(
+	ctx context.Context,
+	uploader *s3manager.Uploader,
+	bucket, key, localPath, cacheControl string,
+	log *zap.Logger,
+) error {
+	f, err := os.Open(localPath)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", localPath, err)
+	}
+	defer f.Close()
+
+	ct := contentTypeFor(localPath)
+
+	_, err = uploader.UploadWithContext(ctx, &s3manager.UploadInput{
+		Bucket:       aws.String(bucket),
+		Key:          aws.String(key),
+		Body:         f,
+		ContentType:  aws.String(ct),
+		CacheControl: aws.String(cacheControl),
+	})
+	if err != nil {
+		return fmt.Errorf("upload %s: %w", key, err)
+	}
+
+	// remove local after successful upload to keep disk light
+	_ = os.Remove(localPath)
+	log.Info("uploaded", zap.String("key", key))
+	return nil
+}
+
+func writeMasterPlaylist(dst string, items []renditionSpec) error {
+	var b strings.Builder
+	b.WriteString("#EXTM3U\n")
+	b.WriteString("#EXT-X-VERSION:7\n")
+	b.WriteString("#EXT-X-INDEPENDENT-SEGMENTS\n")
+	for _, it := range items {
+		// RESOLUTION from Scale (e.g., 1280x720)
+		res := it.Scale
+		// AVERAGE-BANDWIDTH ~ 85% of peak as a heuristic
+		avg := int(float64(it.Bandwidth) * 0.85)
+		// CODECS are reasonably generic for H.264 + AAC LC
+		fmt.Fprintf(&b, "#EXT-X-STREAM-INF:BANDWIDTH=%d,AVERAGE-BANDWIDTH=%d,RESOLUTION=%s,CODECS=\"avc1.42E01E,mp4a.40.2\"\n", it.Bandwidth, avg, res)
+		fmt.Fprintf(&b, "%s/index.m3u8\n", it.Name)
+	}
+	return os.WriteFile(dst, []byte(b.String()), 0644)
+}

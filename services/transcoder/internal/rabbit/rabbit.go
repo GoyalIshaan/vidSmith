@@ -223,19 +223,6 @@ func (c *Consumer) emit(topic string, payload interface{}) error {
 			)
 			break
 		}
-		case "transcodingComplete": {
-			publishingError = c.channel.Publish(
-    	        c.exchange, // exchange
-    	        topic,      // routing key
-    	        false,      // mandatory
-    	        false,      // immediate
-				amqp.Publishing{
-					ContentType: "application/json",
-					Body: body,
-				},
-			)
-			break
-		}
 		default:
         // handle other topics if needed
     }
