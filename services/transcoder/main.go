@@ -9,15 +9,12 @@ import (
 
 	"github.com/GoyalIshaan/vidSmith/services/transcoder/internal/config"
 	"github.com/GoyalIshaan/vidSmith/services/transcoder/internal/rabbit"
-	"github.com/GoyalIshaan/vidSmith/services/transcoder/types"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/streadway/amqp"
 	"go.uber.org/zap"
 )
-
-var NewProducer types.Producer
 
 func main() {
 	config, err := config.LoadConfig()
@@ -48,6 +45,11 @@ func main() {
 	rabbitConsumer, err := rabbit.NewConsumer(rabbitChannel, logger)
 	if err != nil {
 		panic("failed to create RabbitMQ consumer: " + err.Error())
+	}
+
+	rabbit.GlobalProducer, err = rabbit.NewProducer(rabbitChannel, logger)
+	if err != nil {
+		panic("failed to create RabbitMQ producer: " + err.Error())
 	}
 
 	// Start HTTP server for health checks
@@ -85,4 +87,6 @@ func main() {
 	if err != nil {
 		logger.Error("consumer error", zap.Error(err))
 	}
+
+	go rabbit.GlobalProducer.HandleConfirmations(ctx)
 }
