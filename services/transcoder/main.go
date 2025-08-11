@@ -9,12 +9,15 @@ import (
 
 	"github.com/GoyalIshaan/vidSmith/services/transcoder/internal/config"
 	"github.com/GoyalIshaan/vidSmith/services/transcoder/internal/rabbit"
+	"github.com/GoyalIshaan/vidSmith/services/transcoder/types"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/streadway/amqp"
 	"go.uber.org/zap"
 )
+
+var NewProducer types.Producer
 
 func main() {
 	config, err := config.LoadConfig()
