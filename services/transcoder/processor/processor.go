@@ -3,11 +3,13 @@ package processor
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -101,6 +103,13 @@ func Process(
 		}
 	}()
 
+	duration, err := getVideoDuration(ctx, localVideoPath)
+	if err != nil {
+		return fmt.Errorf("get video duration: %w", err)
+	}
+
+	logger.Info("video duration", zap.Float64("duration", duration))
+
 	uploader := s3manager.NewUploader(sess, func(u *s3manager.Uploader) {
 		u.PartSize = 10 * 1024 * 1024 // 10MB parts
 		u.Concurrency = 5
@@ -109,7 +118,7 @@ func Process(
 	
 	thumbnailErrChan := make(chan error)
 	go func() {
-		thumbnailErrChan <- generateThumbnail(ctx, uploader, bucketName, stagingDir, transcodedPrefix, request.VideoId, localVideoPath, logger)
+		thumbnailErrChan <- generateThumbnail(ctx, uploader, bucketName, stagingDir, transcodedPrefix, request.VideoId, localVideoPath, duration, logger)
 	}()
 
 	var failedRenditions []renditionSpec
@@ -338,6 +347,15 @@ func contentTypeFor(p string) string {
 		return "video/mp4"
 	case ".mpd":
 		return "application/dash+xml"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".webp":
+		return "image/webp"
+	case ".png":
+		return "image/png"
+	case ".vtt":
+		return "text/vtt"
+
 	default:
 		return "application/octet-stream"
 	}
@@ -390,14 +408,17 @@ func writeMasterPlaylist(dst string, items []renditionSpec) error {
 	return os.WriteFile(dst, []byte(b.String()), 0644)
 }
 
-func generateThumbnail(ctx context.Context, uploader *s3manager.Uploader, bucket, stagingDir, transcodedPrefix, videoID, videoPath string, logger *zap.Logger) error {
+func generateThumbnail(ctx context.Context, uploader *s3manager.Uploader, bucket, stagingDir, transcodedPrefix, videoID, videoPath string, duration float64, logger *zap.Logger) error {
     thumbDir := filepath.Join(stagingDir, "thumbnails")
     if err := os.MkdirAll(thumbDir, 0755); err != nil {
         return err
     }
 
+	seekTime := duration * 0.25
+	seekTimeStr := fmt.Sprintf("%.1f", seekTime) // the .1f here means 1 decimal place
+
     poster := filepath.Join(thumbDir, "poster.jpg")
-    cmd := exec.CommandContext(ctx, "ffmpeg", "-y", "-ss", "5", "-i", videoPath,
+    cmd := exec.CommandContext(ctx, "ffmpeg", "-y", "-ss", seekTimeStr, "-i", videoPath,
         "-frames:v", "1",
         "-vf", "scale=1280:-1:force_original_aspect_ratio=decrease",
         "-q:v", "2", poster)
@@ -415,4 +436,39 @@ func generateThumbnail(ctx context.Context, uploader *s3manager.Uploader, bucket
     }
 
     return nil
+}
+
+func getVideoDuration(ctx context.Context, videoPath string) (float64, error) {
+    // ffprobe command to output JSON with just the duration
+    cmd := exec.CommandContext(ctx, "ffprobe",
+        "-v", "quiet",
+        "-print_format", "json",
+        "-show_format",
+        videoPath,
+    )
+
+    var out bytes.Buffer
+    cmd.Stdout = &out
+
+    if err := cmd.Run(); err != nil {
+        return 0, err
+    }
+
+    // Parse JSON
+    var probe struct {
+        Format struct {
+            Duration string `json:"duration"`
+        } `json:"format"`
+    }
+
+    if err := json.Unmarshal(out.Bytes(), &probe); err != nil {
+        return 0, err
+    }
+
+    dur, err := strconv.ParseFloat(probe.Format.Duration, 64)
+    if err != nil {
+        return 0, err
+    }
+
+    return dur, nil
 }
