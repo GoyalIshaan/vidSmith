@@ -47,7 +47,7 @@ func main() {
 		panic("failed to create RabbitMQ consumer: " + err.Error())
 	}
 
-	rabbit.GlobalProducer, err = rabbit.NewProducer(rabbitChannel, logger)
+	rabbitProducer, err := rabbit.NewProducer(rabbitChannel, logger)
 	if err != nil {
 		panic("failed to create RabbitMQ producer: " + err.Error())
 	}
@@ -83,10 +83,10 @@ func main() {
 	}()
 	
 	logger.Info("transcoder service started, waiting for messages...")
-	err = rabbitConsumer.Consume(ctx, config.BucketName, config.TranscodedPrefix, config.ManifestPrefix, s3Client, session)
+	err = rabbitConsumer.Consume(ctx, config.BucketName, config.TranscodedPrefix, config.ManifestPrefix, s3Client, session, rabbitProducer)
 	if err != nil {
 		logger.Error("consumer error", zap.Error(err))
 	}
 
-	go rabbit.GlobalProducer.HandleConfirmations(ctx)
+	go rabbitProducer.HandleConfirmations(ctx)
 }

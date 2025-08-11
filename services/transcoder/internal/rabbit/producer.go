@@ -13,8 +13,6 @@ import (
 	"go.uber.org/zap"
 )
 
-var GlobalProducer *Producer
-
 // Producer handles publishing messages to RabbitMQ
 type Producer struct {
 	channel  *amqp.Channel

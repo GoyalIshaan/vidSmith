@@ -77,24 +77,25 @@ func Process(
 	s3Client *s3.S3,
 	sess *session.Session,
 	logger *zap.Logger,
-) error {
+) (types.UpdateVideoStatusEvent, error) {
 	// Confirm that the Process function has been entered.
 	logger.Info("processor.Process function entered")
 
 	stagingDir, err := os.MkdirTemp("", "transcoder-"+ request.VideoId)
 	if err != nil {
-		return fmt.Errorf("create staging directory: %w", err)
+		return types.UpdateVideoStatusEvent{}, fmt.Errorf("create staging directory: %w", err)
 	}
 	
 	defer os.RemoveAll(stagingDir)
 	
 	originalKey := fmt.Sprintf("%s/%s", "originals", request.S3Key)
+	thumbnailKey := path.Join(transcodedPrefix, request.VideoId, "thumbnails", "poster.jpg")
 
 	downloader := s3manager.NewDownloader(sess)
 
 	localVideoPath := filepath.Join(stagingDir, "original_video")
 	if err := downloadVideoFromS3(ctx, downloader, bucketName, originalKey, localVideoPath, logger); err != nil {
-		return fmt.Errorf("download video from S3: %w", err)
+		return types.UpdateVideoStatusEvent{}, fmt.Errorf("download video from S3: %w", err)
 	}
 	
 	defer func() {
@@ -105,7 +106,7 @@ func Process(
 
 	duration, err := getVideoDuration(ctx, localVideoPath)
 	if err != nil {
-		return fmt.Errorf("get video duration: %w", err)
+		return types.UpdateVideoStatusEvent{}, fmt.Errorf("get video duration: %w", err)
 	}
 
 	logger.Info("video duration", zap.Float64("duration", duration))
@@ -118,7 +119,7 @@ func Process(
 	
 	thumbnailErrChan := make(chan error)
 	go func() {
-		thumbnailErrChan <- generateThumbnail(ctx, uploader, bucketName, stagingDir, transcodedPrefix, request.VideoId, localVideoPath, duration, logger)
+		thumbnailErrChan <- generateThumbnail(ctx, uploader, bucketName, stagingDir, thumbnailKey, localVideoPath, duration, logger)
 	}()
 
 	var failedRenditions []renditionSpec
@@ -134,27 +135,35 @@ func Process(
 	}
 	
 	if len(failedRenditions) == len(renditions) {
-		return fmt.Errorf("all renditions failed: %v", failedRenditions)
+		return types.UpdateVideoStatusEvent{}, fmt.Errorf("all renditions failed: %v", failedRenditions)
 	}
 	
 
 	masterPlaylistPath := filepath.Join(stagingDir, "master.m3u8")
 	if err := writeMasterPlaylist(masterPlaylistPath, successRenditions); err != nil {
-		return fmt.Errorf("write master playlist: %w", err)
+		return types.UpdateVideoStatusEvent{}, fmt.Errorf("write master playlist: %w", err)
 	}
 
 	masterS3Key := path.Join(transcodedPrefix, request.VideoId, "master.m3u8")
 	cacheControl := "public, max-age=31536000"
 	
 	if err := uploadFile(ctx, uploader, bucketName, masterS3Key, masterPlaylistPath, cacheControl, logger); err != nil {
-		return fmt.Errorf("upload master playlist: %w", err)
+		return types.UpdateVideoStatusEvent{}, fmt.Errorf("upload master playlist: %w", err)
 	}
 
 	if err := <-thumbnailErrChan; err != nil {
-		return fmt.Errorf("generate thumbnail: %w", err)
+		return types.UpdateVideoStatusEvent{}, fmt.Errorf("generate thumbnail: %w", err)
 	}
 
-	return nil
+	videoStatusEvent := types.UpdateVideoStatusEvent{
+		VideoId: request.VideoId,
+		Phase: "transcode",
+		MasterManifest: masterS3Key,
+		ThumbnailLink: thumbnailKey,
+		VideoDuration: duration,
+	}
+
+	return videoStatusEvent, nil
 }
 
 func processSingleRendition(
@@ -408,7 +417,7 @@ func writeMasterPlaylist(dst string, items []renditionSpec) error {
 	return os.WriteFile(dst, []byte(b.String()), 0644)
 }
 
-func generateThumbnail(ctx context.Context, uploader *s3manager.Uploader, bucket, stagingDir, transcodedPrefix, videoID, videoPath string, duration float64, logger *zap.Logger) error {
+func generateThumbnail(ctx context.Context, uploader *s3manager.Uploader, bucket, stagingDir, s3Key, videoPath string, duration float64, logger *zap.Logger) error {
     thumbDir := filepath.Join(stagingDir, "thumbnails")
     if err := os.MkdirAll(thumbDir, 0755); err != nil {
         return err
@@ -429,8 +438,8 @@ func generateThumbnail(ctx context.Context, uploader *s3manager.Uploader, bucket
         return err
     }
 
-    posterKey := path.Join(transcodedPrefix, videoID, "thumbnails", "poster.jpg")
-    if err := uploadFile(ctx, uploader, bucket, posterKey, poster, "public, max-age=31536000, immutable", logger); err != nil {
+    
+    if err := uploadFile(ctx, uploader, bucket, s3Key, poster, "public, max-age=31536000, immutable", logger); err != nil {
         logger.Warn("poster upload failed", zap.Error(err))
         return err
     }
