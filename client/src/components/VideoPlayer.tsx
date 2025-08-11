@@ -223,7 +223,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           style={{ width: "100%", height: "auto" }}
           preload="metadata"
           controls
-        />
+        >
+          <track
+            kind="captions"
+            srcLang="en"
+            src={`https://d25gw4hj3q83sd.cloudfront.net/captions/srt/${videoId}.vtt`}
+            default
+          />
+        </video>
       </div>
 
       <div className="mt-2 text-xs text-gray-500 text-center">

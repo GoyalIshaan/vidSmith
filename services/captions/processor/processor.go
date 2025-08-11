@@ -46,7 +46,7 @@ func Process(
 	jobName := fmt.Sprintf("caption-%s-%d", request.VideoId, time.Now().Unix())
     inputURI := fmt.Sprintf("s3://%s/originals/%s", bucketName, request.S3Key)
     jsonKey := fmt.Sprintf("%s/%s.json", transcriberJobPrefix, jobName)
-    srtKey := fmt.Sprintf("%s/%s.srt", captionsPrefix, request.VideoId)
+    vttKey := fmt.Sprintf("%s/%s.vtt", captionsPrefix, request.VideoId)
 
     // Validate input file exists and has reasonable size
     headObj, err := s3Client.HeadObjectWithContext(context, &s3.HeadObjectInput{
@@ -198,89 +198,85 @@ func Process(
         zap.Int("wordCount", wordCount))
 
     // 5) Convert to SRT
-    srt, err := toSRT(data.Results.Items)
+    vtt, err := toVTT(data.Results.Items)
     if err != nil {
-        return fmt.Errorf("convert to SRT: %w", err)
+        return fmt.Errorf("convert to VTT: %w", err)
+    }
+    if len(vtt) < 30 {
+        return fmt.Errorf("generated VTT content too short (%d bytes)", len(vtt))
     }
 
-    // Validate SRT content
-    srtLength := len(srt)
-    if srtLength < 50 { // SRT should have at least 50 characters for meaningful content
-        logger.Error("generated SRT content too short", 
-            zap.String("jobName", jobName),
-            zap.Int("srtLength", srtLength),
-            zap.String("srtPreview", string(srt)))
-        return fmt.Errorf("generated SRT content too short (%d bytes) - insufficient transcription", srtLength)
-    }
-
-    logger.Info("SRT generation successful", 
-        zap.String("jobName", jobName),
-        zap.Int("srtLength", srtLength))
-
-    // 6) Upload the .srt back to S3
+    // Upload VTT (the one your player will use)
     _, err = s3Client.PutObjectWithContext(context, &s3.PutObjectInput{
-        Bucket:      aws.String(bucketName),
-        Key:         aws.String(srtKey),
-        Body:        bytes.NewReader(srt),
-        ContentType: aws.String("application/x-subrip"),
-        ACL:         aws.String("private"),
+        Bucket:       aws.String(bucketName),
+        Key:          aws.String(vttKey),
+        Body:         bytes.NewReader(vtt),
+        ContentType:  aws.String("text/vtt"),
+        CacheControl: aws.String("public, max-age=31536000"),
+        ACL:          aws.String("private"), // keep private if CloudFront handles auth
     })
     if err != nil {
-        return fmt.Errorf("upload SRT: %w", err)
+        return fmt.Errorf("upload VTT: %w", err)
     }
 
-    logger.Info("uploaded SRT", zap.String("srtKey", srtKey))
+    logger.Info("uploaded captions", zap.String("vttKey", vttKey))
+
     return nil
 }
 
-func toSRT(items []TranscriptItem) ([]byte, error) {
-    var buf bytes.Buffer
-    seq := 1
-    var words []string
-    var start, end float64
+// WebVTT: "WEBVTT" header, 00:00:00.000 --> 00:00:02.000
+func toVTT(items []TranscriptItem) ([]byte, error) {
+	var buf bytes.Buffer
+	buf.WriteString("WEBVTT\n\n")
 
-    flush := func(punct string) {
-        if len(words) == 0 {
-            return
-        }
-        buf.WriteString(strconv.Itoa(seq) + "\n")
-        buf.WriteString(formatTime(start) + " --> " + formatTime(end) + "\n")
-        buf.WriteString(strings.Join(words, " ") + punct + "\n\n")
-        seq++
-        words = nil
-    }
+	seq := 1
+	var words []string
+	var start, end float64
 
-    for _, it := range items {
-        switch it.Type {
-            case "pronunciation": {
-                st, err1 := strconv.ParseFloat(it.StartTime, 64)
-                et, err2 := strconv.ParseFloat(it.EndTime, 64)
-                if err1 != nil || err2 != nil {
-                    continue
-                }
-                if len(it.Alternatives) == 0 {
-                    continue
-                }
-                if len(words) == 0 {
-                    start = st
-                }
-                end = et
-                words = append(words, it.Alternatives[0].Content)
-                break
-            }
-            case "punctuation": {
-                if len(it.Alternatives) == 0 {
-                    continue
-                }
-                flush(it.Alternatives[0].Content)
-                break
-            }
-        }
-    }
-    // final flush
-    flush("")
-    return buf.Bytes(), nil
+	flush := func(punct string) {
+		if len(words) == 0 {
+			return
+		}
+		// (optional) write an ID line; browsers ignore it but handy for debugging
+		fmt.Fprintf(&buf, "%d\n", seq)
+		fmt.Fprintf(&buf, "%s --> %s\n", formatTimeVTT(start), formatTimeVTT(end))
+		buf.WriteString(strings.Join(words, " ") + punct + "\n\n")
+		seq++
+		words = nil
+	}
+
+	for _, it := range items {
+		switch it.Type {
+		case "pronunciation":
+			st, err1 := strconv.ParseFloat(it.StartTime, 64)
+			et, err2 := strconv.ParseFloat(it.EndTime, 64)
+			if err1 != nil || err2 != nil || len(it.Alternatives) == 0 {
+				continue
+			}
+			if len(words) == 0 {
+				start = st
+			}
+			end = et
+			words = append(words, it.Alternatives[0].Content)
+		case "punctuation":
+			if len(it.Alternatives) == 0 {
+				continue
+			}
+			flush(it.Alternatives[0].Content)
+		}
+	}
+	flush("")
+	return buf.Bytes(), nil
 }
+
+func formatTimeVTT(sec float64) string {
+	h := int(sec) / 3600
+	m := int(sec)%3600 / 60
+	s := int(sec) % 60
+	ms := int(math.Mod(sec, 1.0) * 1000)
+	return fmt.Sprintf("%02d:%02d:%02d.%03d", h, m, s, ms)
+}
+
 
 // formatTime converts seconds to "hh:mm:ss,mmm"
 func formatTime(sec float64) string {
