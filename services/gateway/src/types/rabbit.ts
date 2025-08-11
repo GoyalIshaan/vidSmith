@@ -13,6 +13,8 @@ export interface captionsUpdateMessage extends serverUpdateMessage {
 
 export interface transcoderUpdateMessage extends serverUpdateMessage {
   ManifestKey: string;
+  ThumbnailKey: string;
+  VideoDuration: number;
 }
 
 export interface packagingUpdateMessage extends serverUpdateMessage {

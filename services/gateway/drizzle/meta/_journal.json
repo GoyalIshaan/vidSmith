@@ -8,6 +8,13 @@
       "when": 1753560026480,
       "tag": "0000_motionless_rocket_raccoon",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1754955156645,
+      "tag": "0001_curly_tigra",
+      "breakpoints": true
     }
   ]
 }

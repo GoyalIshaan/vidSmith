@@ -42,6 +42,8 @@ export type Video = {
   bucketName?: Maybe<Scalars["String"]>;
   captionsKey?: Maybe<Scalars["String"]>;
   manifestKey?: Maybe<Scalars["String"]>;
+  thumbnailKey?: Maybe<Scalars["String"]>;
+  videoDuration?: Maybe<Scalars["Float"]>;
   createdAt: Scalars["String"];
 };
 
@@ -243,6 +245,7 @@ export type ResolversTypes = {
   ID: ResolverTypeWrapper<Scalars["ID"]>;
   String: ResolverTypeWrapper<Scalars["String"]>;
   Int: ResolverTypeWrapper<Scalars["Int"]>;
+  Float: ResolverTypeWrapper<Scalars["Float"]>;
   PresignedUrl: ResolverTypeWrapper<PresignedUrl>;
   UploadInfo: ResolverTypeWrapper<UploadInfo>;
   PartInput: PartInput;
@@ -260,6 +263,7 @@ export type ResolversParentTypes = {
   ID: Scalars["ID"];
   String: Scalars["String"];
   Int: Scalars["Int"];
+  Float: Scalars["Float"];
   PresignedUrl: PresignedUrl;
   UploadInfo: UploadInfo;
   PartInput: PartInput;
@@ -292,6 +296,16 @@ export type VideoResolvers<
   >;
   manifestKey?: Resolver<
     Maybe<ResolversTypes["String"]>,
+    ParentType,
+    ContextType
+  >;
+  thumbnailKey?: Resolver<
+    Maybe<ResolversTypes["String"]>,
+    ParentType,
+    ContextType
+  >;
+  videoDuration?: Resolver<
+    Maybe<ResolversTypes["Float"]>,
     ParentType,
     ContextType
   >;
@@ -457,6 +471,18 @@ export interface Loaders<
     bucketName?: LoaderResolver<Maybe<Scalars["String"]>, Video, {}, TContext>;
     captionsKey?: LoaderResolver<Maybe<Scalars["String"]>, Video, {}, TContext>;
     manifestKey?: LoaderResolver<Maybe<Scalars["String"]>, Video, {}, TContext>;
+    thumbnailKey?: LoaderResolver<
+      Maybe<Scalars["String"]>,
+      Video,
+      {},
+      TContext
+    >;
+    videoDuration?: LoaderResolver<
+      Maybe<Scalars["Float"]>,
+      Video,
+      {},
+      TContext
+    >;
     createdAt?: LoaderResolver<Scalars["String"], Video, {}, TContext>;
   };
 

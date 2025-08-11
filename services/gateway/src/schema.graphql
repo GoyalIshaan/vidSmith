@@ -11,6 +11,8 @@ type Video {
   bucketName: String # S3 bucket name
   captionsKey: String # S3 URL for WebVTT captions (set when captioning completes)
   manifestKey: String # HLS manifest path for streaming
+  thumbnailKey: String # S3 URL for thumbnail (set when thumbnail generation completes)
+  videoDuration: Float # Duration of the video in seconds
   createdAt: String! # Creation timestamp
 }
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path"
@@ -158,8 +159,8 @@ func Process(
 	videoStatusEvent := types.UpdateVideoStatusEvent{
 		VideoId: request.VideoId,
 		Phase: "transcode",
-		MasterManifest: masterS3Key,
-		ThumbnailLink: thumbnailKey,
+		ManifestKey: masterS3Key,
+		ThumbnailKey: thumbnailKey,
 		VideoDuration: duration,
 	}
 
@@ -458,6 +459,7 @@ func getVideoDuration(ctx context.Context, videoPath string) (float64, error) {
 
     var out bytes.Buffer
     cmd.Stdout = &out
+	cmd.Stderr = io.Discard
 
     if err := cmd.Run(); err != nil {
         return 0, err

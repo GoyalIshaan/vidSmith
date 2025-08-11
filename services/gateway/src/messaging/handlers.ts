@@ -54,6 +54,8 @@ export async function transcoderMessageHandler(
   const result = await DB.update(videosTable)
     .set({
       manifestKey: message.ManifestKey,
+      thumbnailKey: message.ThumbnailKey,
+      videoDuration: message.VideoDuration,
       status: sql`${videosTable.status} + 1`,
       updatedAt: new Date(),
     })

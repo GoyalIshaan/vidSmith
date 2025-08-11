@@ -5,6 +5,7 @@ import {
   uuid,
   boolean,
   integer,
+  real,
 } from "drizzle-orm/pg-core";
 
 export const videosTable = pgTable("videos", {
@@ -15,6 +16,8 @@ export const videosTable = pgTable("videos", {
   bucketName: varchar({ length: 255 }).$type<string>().default(""),
   captionsKey: varchar({ length: 255 }).$type<string>().default(""),
   manifestKey: varchar({ length: 255 }).$type<string>().default(""),
+  thumbnailKey: varchar({ length: 255 }).$type<string>().default(""),
+  videoDuration: real("videoDuration").$type<number>().default(0),
   censor: boolean("censor").default(false),
   createdAt: timestamp().notNull().defaultNow().$type<Date>(),
   updatedAt: timestamp().notNull().defaultNow().$type<Date>(),

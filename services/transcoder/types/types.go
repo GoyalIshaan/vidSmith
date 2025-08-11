@@ -15,8 +15,8 @@ type TranscodeRequest struct {
 type UpdateVideoStatusEvent struct {
 	VideoId string `json:"VideoId"`
 	Phase string `json:"Phase"`	
-	MasterManifest string `json:"MasterManifest"`
-	ThumbnailLink string `json:"ThumbnailLink"`
+	ManifestKey string `json:"ManifestKey"`
+	ThumbnailKey string `json:"ThumbnailKey"`
 	VideoDuration float64 `json:"VideoDuration"`
 }
 

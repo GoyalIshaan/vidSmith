@@ -18,6 +18,8 @@ export const resolvers: Resolvers = {
           bucketName: video.bucketName,
           captionsKey: video.captionsKey,
           manifestKey: video.manifestKey,
+          thumbnailKey: video.thumbnailKey,
+          videoDuration: video.videoDuration,
           createdAt: video.createdAt.toISOString(),
         }));
       } catch (error) {
@@ -43,6 +45,8 @@ export const resolvers: Resolvers = {
           bucketName: video.bucketName,
           captionsKey: video.captionsKey,
           manifestKey: video.manifestKey,
+          thumbnailKey: video.thumbnailKey,
+          videoDuration: video.videoDuration,
           createdAt: video.createdAt.toISOString(),
         };
       } catch (error) {
