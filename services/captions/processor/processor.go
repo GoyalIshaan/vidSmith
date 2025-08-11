@@ -276,13 +276,3 @@ func formatTimeVTT(sec float64) string {
 	ms := int(math.Mod(sec, 1.0) * 1000)
 	return fmt.Sprintf("%02d:%02d:%02d.%03d", h, m, s, ms)
 }
-
-
-// formatTime converts seconds to "hh:mm:ss,mmm"
-func formatTime(sec float64) string {
-    h := int(sec) / 3600
-    m := int(sec)%3600 / 60
-    s := int(sec) % 60
-    ms := int(math.Mod(sec, 1.0) * 1000)
-    return fmt.Sprintf("%02d:%02d:%02d,%03d", h, m, s, ms)
-}

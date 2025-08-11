@@ -146,7 +146,7 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery) {
 
 	c.logger.Info("received captions request", zap.String("videoId", req.VideoId), zap.String("s3Key", req.S3Key))
 
-	srtKey := fmt.Sprintf("%s/%s.srt", c.captionsPrefix, req.VideoId)
+	srtKey := fmt.Sprintf("%s/%s.vtt", c.captionsPrefix, req.VideoId)
 
 	if err := processor.Process(ctx, req, c.bucketName, c.captionsPrefix, c.transcriberJobPrefix, c.s3Client, c.logger); err != nil {
 		c.logger.Error("captions processing failed", zap.Error(err), zap.String("videoId", req.VideoId))

@@ -20,7 +20,7 @@ func LoadConfig() (*Config, error) {
 
 	viper.AutomaticEnv()
 
-	viper.SetDefault("CAPTIONS_PREFIX", "captions/srt")
+	viper.SetDefault("CAPTIONS_PREFIX", "captions/vtt")
 	viper.SetDefault("TRANSCRIBER_JOB_PREFIX", "captions/job")
 
 	// Required keys

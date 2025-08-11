@@ -12,9 +12,9 @@ func main() {
 	ctx := context.Background()
 
 	// Test data for censor service
-	videoId := "10d3eec5-0454-4807-a5c6-88d473e34e5f"
-	s3Key := "god test's those who test's themselves-ElephantsDream.mp4-1753818005020"
-	srtKey := "captions/srt/10d3eec5-0454-4807-a5c6-88d473e34e5f.srt"
+	videoId := "6d0e3b7e-c8ec-40e2-8e33-afa8049d45d8"
+	s3Key := "last test-ElephantsDream.mp4-1754871084799"
+	srtKey := "captions/srt/6d0e3b7e-c8ec-40e2-8e33-afa8049d45d8.vtt"
 
 	fmt.Println("🚀 Testing Censor Service Publisher")
 	fmt.Printf("📹 VideoId: %s\n", videoId)
