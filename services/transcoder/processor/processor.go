@@ -106,6 +106,12 @@ func Process(
 		u.Concurrency = 5
 	})
 
+	
+	thumbnailErrChan := make(chan error)
+	go func() {
+		thumbnailErrChan <- generateThumbnail(ctx, uploader, bucketName, stagingDir, transcodedPrefix, request.VideoId, localVideoPath, logger)
+	}()
+
 	var failedRenditions []renditionSpec
 	var successRenditions []renditionSpec
 	for _, r := range renditions {
@@ -133,6 +139,10 @@ func Process(
 	
 	if err := uploadFile(ctx, uploader, bucketName, masterS3Key, masterPlaylistPath, cacheControl, logger); err != nil {
 		return fmt.Errorf("upload master playlist: %w", err)
+	}
+
+	if err := <-thumbnailErrChan; err != nil {
+		return fmt.Errorf("generate thumbnail: %w", err)
 	}
 
 	return nil
@@ -358,7 +368,6 @@ func uploadFile(
 		return fmt.Errorf("upload %s: %w", key, err)
 	}
 
-	// remove local after successful upload to keep disk light
 	_ = os.Remove(localPath)
 	log.Info("uploaded", zap.String("key", key))
 	return nil
@@ -379,4 +388,31 @@ func writeMasterPlaylist(dst string, items []renditionSpec) error {
 		fmt.Fprintf(&b, "%s/index.m3u8\n", it.Name)
 	}
 	return os.WriteFile(dst, []byte(b.String()), 0644)
+}
+
+func generateThumbnail(ctx context.Context, uploader *s3manager.Uploader, bucket, stagingDir, transcodedPrefix, videoID, videoPath string, logger *zap.Logger) error {
+    thumbDir := filepath.Join(stagingDir, "thumbnails")
+    if err := os.MkdirAll(thumbDir, 0755); err != nil {
+        return err
+    }
+
+    poster := filepath.Join(thumbDir, "poster.jpg")
+    cmd := exec.CommandContext(ctx, "ffmpeg", "-y", "-ss", "5", "-i", videoPath,
+        "-frames:v", "1",
+        "-vf", "scale=1280:-1:force_original_aspect_ratio=decrease",
+        "-q:v", "2", poster)
+    cmd.Stderr = os.Stderr
+
+    if err := cmd.Run(); err != nil {
+        logger.Warn("poster generation failed", zap.Error(err))
+        return err
+    }
+
+    posterKey := path.Join(transcodedPrefix, videoID, "thumbnails", "poster.jpg")
+    if err := uploadFile(ctx, uploader, bucket, posterKey, poster, "public, max-age=31536000, immutable", logger); err != nil {
+        logger.Warn("poster upload failed", zap.Error(err))
+        return err
+    }
+
+    return nil
 }

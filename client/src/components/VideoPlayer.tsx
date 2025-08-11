@@ -227,7 +227,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           <track
             kind="captions"
             srcLang="en"
-            src={`https://d25gw4hj3q83sd.cloudfront.net/captions/srt/${videoId}.vtt`}
+            src={`https://d25gw4hj3q83sd.cloudfront.net/captions/vtt/${videoId}.vtt`}
             default
           />
         </video>
