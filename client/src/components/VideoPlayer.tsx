@@ -36,6 +36,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [strategy, setStrategy] = useState<"native-hls" | "hls-js" | "">("");
+  const [availableQualities, setAvailableQualities] = useState<
+    Array<{ height: number; bitrate: number; index: number }>
+  >([]);
+  const [selectedQuality, setSelectedQuality] = useState<number | null>(null);
+  const [showQualityMenu, setShowQualityMenu] = useState(false);
+  const [hlsInstance, setHlsInstance] = useState<Hls | null>(null);
 
   // -------- Environment validation --------
   const CDN_BASE_URL = (
@@ -158,11 +164,24 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           maxBufferSize: 60 * 1000 * 1000, // 60MB
         });
 
+        setHlsInstance(hls);
         hls.loadSource(urls.hls);
         hls.attachMedia(videoElement);
 
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           log("HLS manifest parsed successfully", hls.levels);
+          // Extract available qualities
+          const qualities = hls.levels.map((level, index) => ({
+            height: level.height,
+            bitrate: level.bitrate,
+            index,
+          }));
+          setAvailableQualities(qualities);
+          setSelectedQuality(hls.currentLevel);
+        });
+
+        hls.on(Hls.Events.LEVEL_SWITCHED, (event, data) => {
+          setSelectedQuality(data.level);
         });
 
         hls.on(Hls.Events.ERROR, (event, data) => {
@@ -208,6 +227,24 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       videoElement.removeEventListener("error", onError);
     };
   }, [video, onReady, getStreamingUrls, debug, log, warn, err]);
+
+  // Close quality menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Element;
+      if (!target.closest(".quality-selector")) {
+        setShowQualityMenu(false);
+      }
+    };
+
+    if (showQualityMenu) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [showQualityMenu]);
 
   const urls = getStreamingUrls();
 
@@ -265,7 +302,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         </div>
       )}
 
-      <div className="w-full rounded-lg overflow-hidden bg-black">
+      <div className="w-full rounded-lg overflow-hidden bg-black relative">
         <video
           ref={videoRef}
           crossOrigin="anonymous"
@@ -277,6 +314,43 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
             <track kind="captions" srcLang="en" src={urls.captions} default />
           )}
         </video>
+
+        {/* Quality Selector */}
+        {availableQualities.length > 1 && (
+          <div className="absolute top-2 right-2 z-30 quality-selector">
+            <button
+              onClick={() => setShowQualityMenu(!showQualityMenu)}
+              className="bg-black/70 text-white px-3 py-1 rounded text-sm font-medium hover:bg-black/90 transition-colors"
+            >
+              {selectedQuality !== null && availableQualities[selectedQuality]
+                ? `${availableQualities[selectedQuality].height}p`
+                : "Quality"}
+            </button>
+
+            {showQualityMenu && (
+              <div className="absolute top-full right-0 mt-1 bg-black/90 text-white rounded shadow-lg min-w-[120px]">
+                {availableQualities.map((quality, index) => (
+                  <button
+                    key={index}
+                    onClick={() => {
+                      setSelectedQuality(index);
+                      setShowQualityMenu(false);
+                      // Change quality in HLS.js
+                      if (hlsInstance && strategy === "hls-js") {
+                        hlsInstance.currentLevel = index;
+                      }
+                    }}
+                    className={`w-full text-left px-3 py-2 text-sm hover:bg-white/20 transition-colors ${
+                      selectedQuality === index ? "bg-red-500" : ""
+                    }`}
+                  >
+                    {quality.height}p ({Math.round(quality.bitrate / 1000)}kbps)
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
