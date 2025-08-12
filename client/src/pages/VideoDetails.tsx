@@ -1,9 +1,9 @@
 import React, { useEffect, useState, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import VideoPipeline from "../components/VideoPipeline";
-import VideoPlayer from "../components/VideoPlayer";
 import VideoInfo from "../components/VideoInfo";
 import Banner from "../components/Banner";
+import YouTubeVideoPlayer from "../components/YouTubeVideoPlayer";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { useVideoStore } from "../store/videoStore";
 
@@ -22,6 +22,13 @@ const VideoDetails: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Check if video processing is complete
+  const isProcessingComplete =
+    video &&
+    video.transcodingFinished &&
+    video.captionsFinished &&
+    video.censorFinished;
 
   // Set dynamic page title based on video name
   usePageTitle(video ? video.videoName : "Video Details");
@@ -55,30 +62,33 @@ const VideoDetails: React.FC = () => {
 
     loadVideo();
 
-    // Set up polling that checks the current video state each time
-    pollIntervalRef.current = setInterval(async () => {
-      const currentVideo = useVideoStore
-        .getState()
-        .videos.find((v) => v.id === id);
-      if (!currentVideo) return;
+    // Only set up polling if processing is not complete
+    if (!isProcessingComplete) {
+      // Set up polling that checks the current video state each time
+      pollIntervalRef.current = setInterval(async () => {
+        const currentVideo = useVideoStore
+          .getState()
+          .videos.find((v) => v.id === id);
+        if (!currentVideo) return;
 
-      // Only poll if video is still processing (any of these are false)
-      const isStillProcessing =
-        !currentVideo.transcodingFinished || // transcoding not done
-        !currentVideo.captionsFinished || // captions not done
-        !currentVideo.censorFinished; // censoring not done
+        // Only poll if video is still processing (any of these are false)
+        const isStillProcessing =
+          !currentVideo.transcodingFinished || // transcoding not done
+          !currentVideo.captionsFinished || // captions not done
+          !currentVideo.censorFinished; // censoring not done
 
-      if (isStillProcessing) {
-        await fetchLatestVideoById(id);
-      } else {
-        // All processing complete - stop polling
-        console.log(`✅ Video ${id} processing complete - stopping polling`);
-        if (pollIntervalRef.current) {
-          clearInterval(pollIntervalRef.current);
-          pollIntervalRef.current = null;
+        if (isStillProcessing) {
+          await fetchLatestVideoById(id);
+        } else {
+          // All processing complete - stop polling
+          console.log(`✅ Video ${id} processing complete - stopping polling`);
+          if (pollIntervalRef.current) {
+            clearInterval(pollIntervalRef.current);
+            pollIntervalRef.current = null;
+          }
         }
-      }
-    }, 3000);
+      }, 3000);
+    }
 
     // Cleanup function
     return () => {
@@ -87,7 +97,7 @@ const VideoDetails: React.FC = () => {
         pollIntervalRef.current = null;
       }
     };
-  }, [id, fetchLatestVideoById]);
+  }, [id, fetchLatestVideoById, isProcessingComplete]);
 
   const handleRefresh = async () => {
     if (id) {
@@ -163,6 +173,12 @@ const VideoDetails: React.FC = () => {
     );
   }
 
+  // Show YouTube-like player when processing is complete
+  if (isProcessingComplete) {
+    return <YouTubeVideoPlayer video={video} onBack={handleBack} />;
+  }
+
+  // Show processing status when not complete
   return (
     <div className="min-h-screen bg-gray-50">
       <Banner />
@@ -176,7 +192,9 @@ const VideoDetails: React.FC = () => {
             >
               ←
             </button>
-            <h1 className="text-gray-900 text-3xl font-bold">Video Details</h1>
+            <h1 className="text-gray-900 text-3xl font-bold">
+              Processing Video
+            </h1>
             <button
               onClick={handleRefresh}
               className="ml-auto bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1 rounded text-sm font-medium transition-all duration-200 flex items-center gap-1"
@@ -185,40 +203,26 @@ const VideoDetails: React.FC = () => {
             </button>
           </div>
 
+          {/* Processing Status */}
+          <div className="bg-white border border-gray-200 rounded-lg p-8 mb-8">
+            <div className="text-center">
+              <div className="w-16 h-16 border-4 border-gray-200 border-t-blue-500 rounded-full animate-spin mx-auto mb-6"></div>
+              <h2 className="text-xl font-semibold text-gray-900 mb-2">
+                Your video is being processed
+              </h2>
+              <p className="text-gray-600 mb-6">
+                Please wait while we prepare your video for streaming. This
+                usually takes a few minutes.
+              </p>
+            </div>
+          </div>
+
           {/* Video Info Card */}
           <div className="mb-8">
             <VideoInfo video={video} />
           </div>
 
-          {/* Video Player */}
-          {video.transcodingFinished && (
-            <div className="bg-white border border-gray-200 rounded-lg p-8 mb-8">
-              <div className="mb-4">
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                  Video Player
-                </h3>
-                <p className="text-sm text-gray-600">
-                  {video.transcodingFinished &&
-                  video.captionsFinished &&
-                  video.censorFinished
-                    ? "Processing complete! Enjoy adaptive bitrate streaming with automatic quality selection."
-                    : video.transcodingFinished
-                    ? "Video is ready for playback! Processing of captions and content review may still be ongoing."
-                    : "Video is being processed..."}
-                </p>
-              </div>
-              <VideoPlayer
-                video={video}
-                className="w-full"
-                onReady={() => {
-                  // Video player ready
-                }}
-                debug={false}
-              />
-            </div>
-          )}
-
-          {/* Pipeline Component */}
+          {/* Pipeline Component - Show processing details */}
           <VideoPipeline video={video} videoName={video.videoName} />
         </div>
       </main>
