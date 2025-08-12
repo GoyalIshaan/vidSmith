@@ -4,6 +4,7 @@ go 1.23.4
 
 require (
 	github.com/aws/aws-sdk-go v1.55.7
+	github.com/google/uuid v1.6.0
 	github.com/spf13/viper v1.20.1
 	go.uber.org/zap v1.27.0
 )

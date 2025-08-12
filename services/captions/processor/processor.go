@@ -35,10 +35,10 @@ func Process(
 	bucketName, captionsPrefix, transcriberJobPrefix string, 
 	s3Client *s3.S3, 
 	logger *zap.Logger,
-) error{
+) (types.CaptionsReadyEvent, error){
 	cfg, err := config.LoadDefaultConfig(context)
 	if err != nil {
-		return fmt.Errorf("couldn't load config cause of : %w", err)
+		return types.CaptionsReadyEvent{}, fmt.Errorf("couldn't load config cause of : %w", err)
 	}
 
 	transcriber := transcribe.NewFromConfig(cfg);
@@ -54,7 +54,7 @@ func Process(
         Key:    aws.String(fmt.Sprintf("originals/%s", request.S3Key)),
     })
     if err != nil {
-        return fmt.Errorf("input video file not found: %w", err)
+        return types.CaptionsReadyEvent{}, fmt.Errorf("input video file not found: %w", err)
     }
 
     fileSize := *headObj.ContentLength
@@ -62,7 +62,7 @@ func Process(
         logger.Error("input video file too small", 
             zap.String("s3Key", request.S3Key),
             zap.Int64("fileSizeBytes", fileSize))
-        return fmt.Errorf("input video file too small (%d bytes) - may be corrupted", fileSize)
+        return types.CaptionsReadyEvent{}, fmt.Errorf("input video file too small (%d bytes) - may be corrupted", fileSize)
     }
 
     logger.Info("starting transcription", 
@@ -84,7 +84,7 @@ func Process(
             // MaxSpeakerLabels removed - not needed when ShowSpeakerLabels is false
         },
 	}); err != nil {
-		return fmt.Errorf("start transcription job: %w", err)
+		return types.CaptionsReadyEvent{}, fmt.Errorf("start transcription job: %w", err)
 	}
 
 	logger.Info("AWS Transcription Job Started Successfully", 
@@ -99,13 +99,13 @@ func Process(
             logger.Error("transcription job timeout", 
                 zap.String("jobName", jobName),
                 zap.Int("timeoutSeconds", timeout))
-            return fmt.Errorf("transcription job ran for over %d seconds", maxTimeout)
+            return types.CaptionsReadyEvent{}, fmt.Errorf("transcription job ran for over %d seconds", maxTimeout)
         }
         
         select {
             case <-context.Done(): 
                 logger.Info("transcription job cancelled due to context", zap.String("jobName", jobName))
-                return context.Err()
+                return types.CaptionsReadyEvent{}, context.Err()
             case <-time.After(5 * time.Second): {
                 timeout += 5
                 out, err := transcriber.GetTranscriptionJob(context, &transcribe.GetTranscriptionJobInput{
@@ -115,7 +115,7 @@ func Process(
                     logger.Error("failed to get transcription job status", 
                         zap.Error(err), 
                         zap.String("jobName", jobName))
-                    return fmt.Errorf("get transcription job: %w", err)
+                    return types.CaptionsReadyEvent{}, fmt.Errorf("get transcription job: %w", err)
                 }
                 status := string(out.TranscriptionJob.TranscriptionJobStatus)
                 logger.Debug("transcription job status", 
@@ -135,7 +135,7 @@ func Process(
                         logger.Error("transcription job failed", 
                             zap.String("jobName", jobName),
                             zap.String("failureReason", failureReason))
-                        return fmt.Errorf("transcription failed: %s", failureReason)
+                        return types.CaptionsReadyEvent{}, fmt.Errorf("transcription failed: %s", failureReason)
                     }
                     case "IN_PROGRESS":
                         // Continue polling
@@ -156,7 +156,7 @@ func Process(
     })
 
     if err != nil {
-        return fmt.Errorf("download transcript JSON: %w", err)
+        return types.CaptionsReadyEvent{}, fmt.Errorf("download transcript JSON: %w", err)
     }
 
     defer obj.Body.Close()
@@ -167,14 +167,14 @@ func Process(
         } `json:"results"`
     }
     if err := json.NewDecoder(obj.Body).Decode(&data); err != nil {
-        return fmt.Errorf("decode transcript JSON: %w", err)
+        return types.CaptionsReadyEvent{}, fmt.Errorf("decode transcript JSON: %w", err)
     }
 
     // Validate transcription results
     if len(data.Results.Items) == 0 {
         logger.Error("transcription completed but no transcript items found", 
             zap.String("jobName", jobName))
-        return fmt.Errorf("transcription produced no content - video may have no speech or be too short")
+        return types.CaptionsReadyEvent{}, fmt.Errorf("transcription produced no content - video may have no speech or be too short")
     }
 
     // Count meaningful words (excluding punctuation)
@@ -189,7 +189,7 @@ func Process(
         logger.Error("transcription completed but insufficient content", 
             zap.String("jobName", jobName),
             zap.Int("wordCount", wordCount))
-        return fmt.Errorf("transcription produced insufficient content (%d words) - video may be too short or have no clear speech", wordCount)
+        return types.CaptionsReadyEvent{}, fmt.Errorf("transcription produced insufficient content (%d words) - video may be too short or have no clear speech", wordCount)
     }
 
     logger.Info("transcription validation passed", 
@@ -200,10 +200,10 @@ func Process(
     // 5) Convert to SRT
     vtt, err := toVTT(data.Results.Items)
     if err != nil {
-        return fmt.Errorf("convert to VTT: %w", err)
+        return types.CaptionsReadyEvent{}, fmt.Errorf("convert to VTT: %w", err)
     }
     if len(vtt) < 30 {
-        return fmt.Errorf("generated VTT content too short (%d bytes)", len(vtt))
+        return types.CaptionsReadyEvent{}, fmt.Errorf("generated VTT content too short (%d bytes)", len(vtt))
     }
 
     // Upload VTT (the one your player will use)
@@ -216,12 +216,17 @@ func Process(
         ACL:          aws.String("private"), // keep private if CloudFront handles auth
     })
     if err != nil {
-        return fmt.Errorf("upload VTT: %w", err)
+        return types.CaptionsReadyEvent{}, fmt.Errorf("upload VTT: %w", err)
     }
 
     logger.Info("uploaded captions", zap.String("vttKey", vttKey))
-
-    return nil
+    
+    captionsReadyEvent := types.CaptionsReadyEvent{
+        VideoId: request.VideoId,
+        S3Key: request.S3Key,
+        VTTKey: vttKey,
+    }
+    return captionsReadyEvent, nil
 }
 
 // WebVTT: "WEBVTT" header, 00:00:00.000 --> 00:00:02.000

@@ -1,0 +1,165 @@
+package rabbit
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+
+	"github.com/GoyalIshaan/vidSmith/tree/master/services/captions/processor"
+	"github.com/GoyalIshaan/vidSmith/tree/master/services/captions/types"
+	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/streadway/amqp"
+	"go.uber.org/zap"
+)
+
+const prefetchCount = 5
+
+type Consumer struct {
+	channel *amqp.Channel
+	queue   string
+	exchange string
+	logger  *zap.Logger
+	bucketName string
+	captionsPrefix string
+	transcriberJobPrefix string
+	s3Client *s3.S3
+}
+
+func NewConsumer(
+	channel *amqp.Channel, 
+	logger *zap.Logger,
+	bucketName, captionsPrefix, transcriberJobPrefix string,
+	s3Client *s3.S3,
+) (*Consumer, error) {
+	queueName := "captionsRequest"
+	exchangeName := "newVideoUploaded"
+	exchangeType := "topic"
+	routingKey := "videoUploaded"
+
+	// Declare the exchange (same as gateway)
+	if err := channel.ExchangeDeclare(
+		exchangeName,
+		exchangeType,
+		true,  // durable
+		false, // auto-deleted
+		false, // internal
+		false, // no-wait
+		nil,   // arguments
+	); err != nil {
+		return nil, fmt.Errorf("exchange declare: %w", err)
+	}
+
+	// Declare the queue
+	if _, err := channel.QueueDeclare(
+		queueName,
+		true,  // durable
+		false, // delete when unused
+		false, // exclusive
+		false, // no-wait
+		nil,   // arguments
+	); err != nil {
+		return nil, err
+	}
+
+	// Bind the queue to the exchange with the routing key
+	if err := channel.QueueBind(
+		queueName,
+		routingKey,
+		exchangeName,
+		false, // no-wait
+		nil,   // arguments
+	); err != nil {
+		return nil, fmt.Errorf("queue bind: %w", err)
+	}
+
+	// sets the prefetch count
+	if err := channel.Qos(prefetchCount, 0, false); err != nil {
+		return nil, fmt.Errorf("qos set: %w", err)
+	}
+
+	return &Consumer{
+		channel: channel, 
+		queue: queueName, 
+		exchange: exchangeName,
+		logger: logger,
+		bucketName: bucketName,
+		captionsPrefix: captionsPrefix,
+		transcriberJobPrefix: transcriberJobPrefix,
+		s3Client: s3Client,
+		}, nil
+}
+
+func (c *Consumer) Consume(ctx context.Context, producer *Producer) error {
+	msgs, err := c.channel.Consume(
+		c.queue,
+		"",    // consumer tag
+		false, // auto-ack
+		false, // exclusive
+		false, // no-local
+		false, // no-wait
+		nil,   // arguments
+	)
+
+	if err != nil {
+		return fmt.Errorf("consume: %w", err)
+	}
+
+	// Semaphore to limit concurrent goroutines
+	semaphore := make(chan struct{}, prefetchCount)
+
+	for {
+		select {
+		case <- ctx.Done():
+			return nil
+		case d, ok := <-msgs:
+			if !ok {
+				return nil // channel closed
+			}
+
+			// Acquire semaphore slot
+			semaphore <- struct{}{}
+
+			go func(delivery amqp.Delivery) {
+				defer func() { <-semaphore }() // Release semaphore slot
+				c.handle(ctx, delivery, producer)
+			}(d)
+		}
+	}
+}
+
+func (c *Consumer) handle(ctx context.Context, d amqp.Delivery, producer *Producer) {	
+	defer func() {
+		// Recover from panic and nack the message
+		if r := recover(); r != nil {
+			c.logger.Error("panic in handle", zap.Any("error", r))
+			d.Nack(false, true)
+		}
+	}()
+	
+	var req types.CaptionsRequest
+	if err := json.Unmarshal(d.Body, &req); err != nil {
+		c.logger.Error("invalid message", zap.Error(err), zap.ByteString("body", d.Body))
+		d.Nack(false, false) // discard bad message
+		return
+	}
+
+	c.logger.Info("received captions request", zap.String("videoId", req.VideoId), zap.String("s3Key", req.S3Key))
+
+	captionsReadyEvent, err := processor.Process(ctx, req, c.bucketName, c.captionsPrefix, c.transcriberJobPrefix, c.s3Client, c.logger)
+	if err != nil {
+		c.logger.Error("captions processing failed", zap.Error(err), zap.String("videoId", req.VideoId))
+		d.Nack(false, true)
+		return
+	}
+
+	d.Ack(false)
+
+	producer.PublishCaptionsReady(captionsReadyEvent)
+	producer.PublishUpdateVideoStatus(types.UpdateVideoStatusEvent{
+		VideoId: req.VideoId,
+		Phase: "captions",
+		VTTKey: captionsReadyEvent.VTTKey,
+	})
+
+
+}

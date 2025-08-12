@@ -8,11 +8,11 @@ type CaptionsRequest struct {
 type CaptionsReadyEvent struct {
 	VideoId    string `json:"VideoId"`
 	S3Key      string `json:"S3Key"`
-	SRTKey      string `json:"SRTKey"`
+	VTTKey      string `json:"VTTKey"`
 }
 
 type UpdateVideoStatusEvent struct {
 	VideoId string `json:"VideoId"`
 	Phase string `json:"Phase"`
-	SRTKey string `json:"SRTKey"`
+	VTTKey string `json:"VTTKey"`
 }
