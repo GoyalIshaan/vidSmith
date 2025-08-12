@@ -8,7 +8,7 @@ import "dotenv/config";
 import { UploadClient } from "./clients/uploadClient";
 import { MetadataClient } from "./clients/metadataClient";
 import { resolvers } from "./resolvers";
-import codegenMercurius from "mercurius-codegen";
+// Note: mercurius-codegen removed for production build
 import { startConsuming } from "./messaging/consumer";
 import { testDatabaseConnection } from "./db/dbSetup";
 import { healthCheckPlugin } from "./health/healthCheck";
@@ -56,10 +56,8 @@ app.register(mercurius as any, {
   jit: 1,
 });
 
-// Generate types for the GraphQL schema
-codegenMercurius(app, {
-  targetPath: path.join(__dirname, "types", "graphql.ts"),
-});
+// Note: GraphQL types are pre-generated during development
+// No need to run mercurius-codegen in production
 
 startConsuming();
 

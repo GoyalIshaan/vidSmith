@@ -1,4 +1,4 @@
-import { DB } from "../db/dbSetup";
+import { DB, withDBRetry } from "../db/dbSetup";
 import { videosTable } from "../db/schema";
 import { eq } from "drizzle-orm";
 import {
@@ -37,12 +37,14 @@ export class UploadClient {
       const response: CreateMultipartUploadCommandOutput =
         await s3Client.send(command);
 
-      const [video] = await DB.insert(videosTable)
-        .values({
-          videoName,
-          s3Key,
-        })
-        .returning();
+      const [video] = await withDBRetry(() =>
+        DB.insert(videosTable)
+          .values({
+            videoName,
+            s3Key,
+          })
+          .returning()
+      );
 
       return {
         uploadId: response.UploadId,
@@ -102,12 +104,14 @@ export class UploadClient {
 
     const response = await s3Client.send(command);
 
-    const [videoDetailsInDB] = await DB.update(videosTable)
-      .set({
-        bucketName: response.Bucket!,
-      })
-      .where(eq(videosTable.id, videoDBID))
-      .returning();
+    const [videoDetailsInDB] = await withDBRetry(() =>
+      DB.update(videosTable)
+        .set({
+          bucketName: response.Bucket!,
+        })
+        .where(eq(videosTable.id, videoDBID))
+        .returning()
+    );
 
     await publishNewVideo({
       videoId: videoDetailsInDB.id,
@@ -128,7 +132,9 @@ export class UploadClient {
       });
       await s3Client.send(abortCmd);
 
-      await DB.delete(videosTable).where(eq(videosTable.id, videoDBID));
+      await withDBRetry(() =>
+        DB.delete(videosTable).where(eq(videosTable.id, videoDBID))
+      );
 
       return true;
     } catch (error) {
