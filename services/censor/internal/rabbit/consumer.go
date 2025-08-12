@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/GoyalIshaan/vidSmith/tree/master/services/censor/processor"
 	"github.com/GoyalIshaan/vidSmith/tree/master/services/censor/types"
@@ -89,7 +88,7 @@ func NewConsumer(
 		}, nil
 }
 
-func (c *Consumer) Consume(ctx context.Context) error {
+func (c *Consumer) Consume(ctx context.Context, producer *Producer) error {
 	msgs, err := c.channel.Consume(
 		c.queue,
 		"",    // consumer tag
@@ -121,13 +120,13 @@ func (c *Consumer) Consume(ctx context.Context) error {
 
 			go func(delivery amqp.Delivery) {
 				defer func() { <-semaphore }() // Release semaphore slot
-				c.handle(ctx, delivery)
+				c.handle(ctx, delivery, producer)
 			}(d)
 		}
 	}
 }
 
-func (c *Consumer) handle(ctx context.Context, d amqp.Delivery) {
+func (c *Consumer) handle(ctx context.Context, d amqp.Delivery, producer *Producer) {
 	// TODO: Implement message handling logic
 	defer func() {
 		// Recover from panic and nack the message
@@ -173,64 +172,8 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery) {
 		Censor: result,
 	}
 
-	// Retry the updateServer event emission up to 3 times
-	maxRetries := 3
-	var emitErr error
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		emitErr = c.emit("updateVideoStatus", event)
-		if emitErr == nil {
-			break // Success, exit retry loop
-		}
-		
-		c.logger.Error("failed to publish updateVideoStatus event", 
-			zap.Error(emitErr), 
-			zap.Int("attempt", attempt),
-			zap.Int("maxRetries", maxRetries))
-		
-		if attempt < maxRetries {
-			// Wait before retry (exponential backoff)
-			time.Sleep(time.Duration(attempt) * time.Second)
-		}
-	}
-	
-	if emitErr != nil {
-		c.logger.Error("failed to publish updateVideoStatus event after all retries", 
-			zap.Error(emitErr), 
-			zap.String("videoId", req.VideoId))
-	}
+	producer.PublishUpdateVideoStatus(event)
 
 	c.logger.Info("censor request completed", zap.String("videoId", req.VideoId))
 }
 
-func (c *Consumer) emit(topic string, payload interface{}) error {
-	body, err := json.Marshal(payload)
-    if err != nil {
-        c.logger.Error("failed to marshal payload", zap.Error(err))
-        return err
-    }
-
-    var publishingError error
-    switch topic {
-		case "updateVideoStatus": {
-			publishingError = c.channel.Publish(
-    	        c.exchange, // exchange
-    	        topic,      // routing key
-    	        false,      // mandatory
-    	        false,      // immediate
-				amqp.Publishing{
-					ContentType: "application/json",
-					Body: body,
-				},
-			)
-		}
-		default:
-        // handle other topics if needed
-    }
-
-    if publishingError != nil {
-        c.logger.Error("failed to publish message", zap.Error(publishingError), zap.String("topic", topic))
-        return publishingError
-    }
-    c.logger.Info("message published", zap.String("exchange", c.exchange), zap.String("topic", topic))
-    return nil
-}

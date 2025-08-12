@@ -6,6 +6,7 @@ toolchain go1.23.4
 
 require (
 	github.com/aws/aws-sdk-go v1.44.276
+	github.com/google/uuid v1.6.0
 	github.com/spf13/viper v1.15.0
 	github.com/streadway/amqp v1.0.0
 	github.com/subosito/gotenv v1.4.2

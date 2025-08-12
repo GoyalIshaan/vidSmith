@@ -49,6 +49,11 @@ func main() {
 		panic("failed to create RabbitMQ consumer: " + err.Error())
 	}
 
+	rabbitProducer, err := rabbit.NewProducer(rabbitChannel, logger)
+	if err != nil {
+		panic("failed to create RabbitMQ producer: " + err.Error())
+	}
+
 	// Start HTTP server for health checks
 	go func() {
 		http.HandleFunc("/ready", func(w http.ResponseWriter, r *http.Request) {
@@ -80,8 +85,10 @@ func main() {
 	}()
 	
 	logger.Info("censor service started, waiting for messages...")
-	err = rabbitConsumer.Consume(ctx)
+	err = rabbitConsumer.Consume(ctx, rabbitProducer)
 	if err != nil {
 		logger.Error("consumer error", zap.Error(err))
 	}
+
+	rabbitProducer.HandleConfirmations(ctx)
 }
