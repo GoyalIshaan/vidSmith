@@ -17,6 +17,9 @@ const GET_VIDEO = gql`
       s3Key
       bucketName
       captionsKey
+      manifestKey
+      thumbnailKey
+      videoDuration
       createdAt
     }
   }
@@ -151,7 +154,7 @@ const VideoDetails: React.FC = () => {
                 </p>
               </div>
               <VideoPlayer
-                videoId={video.id}
+                video={video}
                 className="w-full"
                 onReady={() => {
                   // Video player ready

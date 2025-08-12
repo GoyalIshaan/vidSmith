@@ -5,6 +5,9 @@ export interface Video {
   s3Key?: string;
   bucketName?: string;
   captionsKey?: string;
+  manifestKey?: string;
+  thumbnailKey?: string;
+  videoDuration?: number;
   createdAt: string;
 }
 
