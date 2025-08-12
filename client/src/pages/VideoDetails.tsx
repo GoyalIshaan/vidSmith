@@ -7,6 +7,7 @@ import VideoPipeline from "../components/VideoPipeline";
 import VideoPlayer from "../components/VideoPlayer";
 import VideoInfo from "../components/VideoInfo";
 import Banner from "../components/Banner";
+import { usePageTitle } from "../hooks/usePageTitle";
 
 const GET_VIDEO = gql`
   query GetVideo($id: ID!) {
@@ -34,6 +35,9 @@ const VideoDetails: React.FC = () => {
     skip: !id,
   });
   const [video, setVideo] = useState<Video | null>(null);
+
+  // Set dynamic page title based on video name
+  usePageTitle(video ? video.videoName : "Video Details");
 
   useEffect(() => {
     if (data?.video) {

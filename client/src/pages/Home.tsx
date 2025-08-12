@@ -3,6 +3,7 @@ import { useQuery } from "@apollo/client";
 import { gql } from "@apollo/client";
 import type { Video } from "../types/graphql";
 import VideoCard from "../components/VideoCard";
+import { usePageTitle } from "../hooks/usePageTitle";
 
 const GET_VIDEOS = gql`
   query GetVideos {
@@ -19,6 +20,7 @@ const GET_VIDEOS = gql`
 `;
 
 const Home: React.FC = () => {
+  usePageTitle("Home");
   const { loading, error, data, refetch } = useQuery(GET_VIDEOS);
   const [videos, setVideos] = useState<Video[]>([]);
 

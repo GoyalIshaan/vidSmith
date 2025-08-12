@@ -1,6 +1,8 @@
 import React, { useState } from "react";
+import { usePageTitle } from "../hooks/usePageTitle";
 
 const About: React.FC = () => {
+  usePageTitle("About");
   const [activeSection, setActiveSection] = useState<string>("overview");
 
   const sections = [

@@ -1,12 +1,14 @@
 import React, { useState, useRef } from "react";
 import { UploadService } from "../lib/uploadService";
 import FileSelector from "../components/FileSelector";
+import { usePageTitle } from "../hooks/usePageTitle";
 import FileForm from "../components/FileForm";
 import UploadProgress from "../components/UploadProgress";
 import StatusMessage from "../components/StatusMessage";
 import type { UploadProgress as UploadProgressType } from "../types/graphql";
 
 const Upload: React.FC = () => {
+  usePageTitle("Upload Video");
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] =
     useState<UploadProgressType | null>(null);
