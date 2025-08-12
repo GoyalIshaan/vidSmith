@@ -59,7 +59,6 @@ const COMPLETE_UPLOAD = gql`
     ) {
       videoDBID
       bucketName
-      status
     }
   }
 `;

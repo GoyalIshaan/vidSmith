@@ -10,7 +10,9 @@ const GET_VIDEOS = gql`
     videos {
       id
       videoName
-      status
+      transcodingFinished
+      captionsFinished
+      censorFinished
       s3Key
       bucketName
       captionsKey

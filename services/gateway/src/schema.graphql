@@ -6,7 +6,9 @@ A video in the system, tracked by metadata-service.
 type Video {
   id: ID! # Unique identifier from metadata-service
   videoName: String! # Original filename
-  status: Int! # 0: UPLOADING, 1: TRANSCODING, 2: READY, 3: ERROR
+  transcodingFinished: Boolean # Whether transcoding is complete
+  captionsFinished: Boolean # Whether captions are complete
+  censorFinished: Boolean # Whether censor is complete
   s3Key: String # S3 URL for HLS/DASH manifest (set when transcoding completes)
   bucketName: String # S3 bucket name
   captionsKey: String # S3 URL for WebVTT captions (set when captioning completes)
@@ -95,7 +97,6 @@ type Mutation {
 type CompleteMultipartUploadResponse {
   videoDBID: ID!
   bucketName: String!
-  status: Int!
 }
 
 type InitiateUploadResponse {
@@ -106,7 +107,7 @@ type InitiateUploadResponse {
 
 type Subscription {
   """
-  Listen for when a video finishes processing (status becomes READY).
+  Listen for when a video finishes processing (transcoding, captions, censor are complete).
   """
   videoProcessed(id: ID!): Video
 }

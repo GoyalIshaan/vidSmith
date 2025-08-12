@@ -3,7 +3,7 @@ package types
 type CensorRequest struct {
 	VideoId    string `json:"VideoId"`
 	S3Key      string `json:"S3Key"`
-	SRTKey      string `json:"SRTKey"`
+	VTTKey      string `json:"VTTKey"`
 }
 
 type GeminiReturns struct {

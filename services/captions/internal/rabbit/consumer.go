@@ -154,12 +154,22 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery, producer *Produc
 
 	d.Ack(false)
 
-	if captionsReadyEvent == (types.CaptionsReadyEvent{}) { return }
+	if captionsReadyEvent.VTTKey == "" { 
+		noCaptionsEvent := types.UpdateVideoStatusEvent{
+			VideoId: req.VideoId,
+			Phase: "captions",
+			VTTKey: "",
+			NoCaptions: true,
+		}
+		producer.PublishUpdateVideoStatus(noCaptionsEvent)
+		return
+	}
 
 	producer.PublishCaptionsReady(captionsReadyEvent)
 	producer.PublishUpdateVideoStatus(types.UpdateVideoStatusEvent{
 		VideoId: req.VideoId,
 		Phase: "captions",
 		VTTKey: captionsReadyEvent.VTTKey,
+		NoCaptions: false,
 	})
 }

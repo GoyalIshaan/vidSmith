@@ -41,7 +41,6 @@ export class UploadClient {
         .values({
           videoName,
           s3Key,
-          status: 0,
         })
         .returning();
 
@@ -105,7 +104,6 @@ export class UploadClient {
 
     const [videoDetailsInDB] = await DB.update(videosTable)
       .set({
-        status: 0,
         bucketName: response.Bucket!,
       })
       .where(eq(videosTable.id, videoDBID))
@@ -119,7 +117,6 @@ export class UploadClient {
     return {
       videoDBID: videoDetailsInDB.id,
       bucketName: response.Bucket!,
-      status: videoDetailsInDB.status,
     };
   }
 

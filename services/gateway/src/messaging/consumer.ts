@@ -9,7 +9,6 @@ import type {
 import censorMessageHandler, {
   captionsMessageHandler,
   transcoderMessageHandler,
-  packagingMessageHandler,
 } from "./handlers";
 import {
   RABBITMQ_URL,
@@ -116,11 +115,6 @@ async function processMessage(messageData: any): Promise<void> {
     const transcoderMessage: transcoderUpdateMessage = messageData;
     const result = await transcoderMessageHandler(transcoderMessage);
     console.log("Transcode handler result:", result);
-  } else if (phase == "packaging") {
-    console.log("Handling packaging message");
-    const packagingMessage: packagingUpdateMessage = messageData;
-    const result = await packagingMessageHandler(packagingMessage);
-    console.log("Packaging handler result:", result);
   } else {
     console.warn(`⚠️ Unknown message type received:`, messageData);
   }

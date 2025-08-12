@@ -14,7 +14,9 @@ const GET_VIDEO = gql`
     video(id: $id) {
       id
       videoName
-      status
+      transcodingFinished
+      captionsFinished
+      censorFinished
       s3Key
       bucketName
       captionsKey
@@ -143,16 +145,18 @@ const VideoDetails: React.FC = () => {
           </div>
 
           {/* Video Player */}
-          {video.status >= 1 && (
+          {video.transcodingFinished && (
             <div className="bg-white border border-gray-200 rounded-lg p-8 mb-8">
               <div className="mb-4">
                 <h3 className="text-lg font-semibold text-gray-900 mb-2">
                   Video Player
                 </h3>
                 <p className="text-sm text-gray-600">
-                  {video.status >= 6
+                  {video.transcodingFinished &&
+                  video.captionsFinished &&
+                  video.censorFinished
                     ? "Processing complete! Enjoy adaptive bitrate streaming with automatic quality selection."
-                    : video.status >= 1
+                    : video.transcodingFinished
                     ? "Video is ready for playback! Processing of captions and content review may still be ongoing."
                     : "Video is being processed..."}
                 </p>
@@ -169,7 +173,7 @@ const VideoDetails: React.FC = () => {
           )}
 
           {/* Pipeline Component */}
-          <VideoPipeline status={video.status} videoName={video.videoName} />
+          <VideoPipeline video={video} videoName={video.videoName} />
         </div>
       </main>
     </div>

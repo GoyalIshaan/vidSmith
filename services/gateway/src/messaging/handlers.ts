@@ -2,7 +2,6 @@ import type {
   censorUpdateMessage,
   captionsUpdateMessage,
   transcoderUpdateMessage,
-  packagingUpdateMessage,
 } from "../types/rabbit";
 import { DB } from "../db/dbSetup";
 import { videosTable } from "../db/schema";
@@ -14,7 +13,7 @@ export default async function censorMessageHandler(
   const result = await DB.update(videosTable)
     .set({
       censor: message.Censor,
-      status: sql`${videosTable.status} + 3`,
+      censorFinished: true,
       updatedAt: new Date(),
     })
     .where(eq(videosTable.id, message.VideoId))
@@ -27,16 +26,18 @@ export async function captionsMessageHandler(message: captionsUpdateMessage) {
   console.log("Processing captions message:", JSON.stringify(message, null, 2));
 
   const updateData: any = {
-    status: sql`${videosTable.status} + 2`,
+    captionsFinished: true,
     updatedAt: new Date(),
   };
 
-  // Only set captionsKey if SRTKey is provided and not empty
-  if (message.SRTKey && message.SRTKey.trim() !== "") {
-    updateData.captionsKey = message.SRTKey;
-    console.log("Setting captions key:", message.SRTKey);
+  // Only set captionsKey if VTTKey is provided and not empty
+  if (message.VTTKey && message.VTTKey.trim() !== "") {
+    updateData.captionsKey = message.VTTKey;
+    console.log("Setting captions key:", message.VTTKey);
   } else {
-    console.log("Captions failed - no SRT key provided");
+    updateData.captionsFinished = true;
+    updateData.censorFinished = true;
+    console.log("Captions failed - no VTT key provided");
   }
 
   const result = await DB.update(videosTable)
@@ -56,37 +57,11 @@ export async function transcoderMessageHandler(
       manifestKey: message.ManifestKey,
       thumbnailKey: message.ThumbnailKey,
       videoDuration: message.VideoDuration,
-      status: sql`${videosTable.status} + 1`,
+      transcodingFinished: true,
       updatedAt: new Date(),
     })
     .where(eq(videosTable.id, message.VideoId))
     .returning();
 
-  return result[0];
-}
-
-export async function packagingMessageHandler(message: packagingUpdateMessage) {
-  console.log(
-    "Processing packaging message:",
-    JSON.stringify(message, null, 2)
-  );
-
-  const updateData: any = {
-    status: sql`${videosTable.status} + 1`,
-    updatedAt: new Date(),
-  };
-
-  // Set both manifest keys if provided
-  if (message.ManifestKey && message.ManifestKey.trim() !== "") {
-    updateData.manifestKey = message.ManifestKey;
-    console.log("Setting manifest key:", message.ManifestKey);
-  }
-
-  const result = await DB.update(videosTable)
-    .set(updateData)
-    .where(eq(videosTable.id, message.VideoId))
-    .returning();
-
-  console.log("Packaging handler result:", result[0]);
   return result[0];
 }

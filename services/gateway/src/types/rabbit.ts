@@ -8,7 +8,8 @@ export interface censorUpdateMessage extends serverUpdateMessage {
 }
 
 export interface captionsUpdateMessage extends serverUpdateMessage {
-  SRTKey: string;
+  VTTKey: string;
+  NoCaptions: boolean;
 }
 
 export interface transcoderUpdateMessage extends serverUpdateMessage {

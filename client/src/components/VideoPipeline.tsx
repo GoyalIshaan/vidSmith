@@ -1,27 +1,38 @@
 import React from "react";
+import type { Video } from "../types/graphql";
+import { getVideoStatus } from "../lib/videoStatus";
 
 interface VideoPipelineProps {
-  status: number;
+  video: Video;
   videoName: string;
 }
 
-const VideoPipeline: React.FC<VideoPipelineProps> = ({ status, videoName }) => {
+const VideoPipeline: React.FC<VideoPipelineProps> = ({ video, videoName }) => {
+  const videoStatus = getVideoStatus(video);
+  const { transcodingFinished, captionsFinished, censorFinished } = video;
+
   const getPhaseStatus = (phase: string) => {
     switch (phase) {
       case "upload":
-        return status >= 0 ? "completed" : "pending";
+        return "completed"; // Always completed if we have the video object
       case "transcoding":
-        return status >= 1 ? "completed" : status === 0 ? "active" : "pending";
+        return transcodingFinished ? "completed" : "active";
       case "captioning":
-        return status >= 2 ? "completed" : status === 1 ? "active" : "pending";
-      case "censoring":
-        return status >= 5
+        return captionsFinished
           ? "completed"
-          : status === 4 || status === 3 || status === 2
+          : transcodingFinished
+          ? "active"
+          : "pending";
+      case "censoring":
+        return censorFinished
+          ? "completed"
+          : transcodingFinished || captionsFinished
           ? "active"
           : "pending";
       case "done":
-        return status === 6 ? "completed" : "pending";
+        return transcodingFinished && captionsFinished && censorFinished
+          ? "completed"
+          : "pending";
       default:
         return "pending";
     }
@@ -118,20 +129,7 @@ const VideoPipeline: React.FC<VideoPipelineProps> = ({ status, videoName }) => {
 
       <div className="mt-4 text-center">
         <div className="text-sm text-gray-600">
-          Status: {status} | Current Phase:{" "}
-          {status === 6
-            ? "Complete"
-            : status === 5
-            ? "Processing Final"
-            : status === 3 || status === 4
-            ? "Censoring"
-            : status === 2
-            ? "Captioning Done"
-            : status === 1
-            ? "Transcoding Complete - Video Ready!"
-            : status === 0
-            ? "Uploaded"
-            : "Error"}
+          Status: {videoStatus.text} | Current Phase: {videoStatus.text}
         </div>
       </div>
     </div>

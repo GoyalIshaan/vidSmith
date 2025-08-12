@@ -145,18 +145,18 @@ func (c *Consumer) handle(ctx context.Context, d amqp.Delivery, producer *Produc
 		return
 	}
 
-	c.logger.Info("received censor request", zap.String("videoId", req.VideoId), zap.String("s3Key", req.S3Key), zap.String("srtKey", req.SRTKey))
+	c.logger.Info("received censor request", zap.String("videoId", req.VideoId), zap.String("s3Key", req.S3Key), zap.String("vttKey", req.VTTKey))
 
 	// Validate that we have a valid SRT key (captions must be completed first)
-	if req.SRTKey == "" {
-		c.logger.Error("censor request received without SRT key - captions not completed", zap.String("videoId", req.VideoId))
-		d.Nack(false, false) // discard invalid message
+	if req.VTTKey == "" {
+		c.logger.Info("videoId: " + req.VideoId + " has no captions")
+		d.Ack(false)
 		return
 	}
 
 	// Use the existing s3Client's session instead of creating a new one
 	// invoking the censoring services
-	result, err := processor.Process(ctx,  c.bucketName, req.SRTKey, c.s3Client, c.googleAPIKey, c.logger)
+	result, err := processor.Process(ctx, c.bucketName, req.VTTKey, c.s3Client, c.googleAPIKey, c.logger)
 	if err !=nil {
 		c.logger.Error("censoring failed", zap.Error(err))
 		d.Nack(false, true) // requeue for retry

@@ -1,66 +1,13 @@
 import React from "react";
 import type { Video } from "../types/graphql";
+import { getVideoStatusLarge } from "../lib/videoStatus";
 
 interface VideoInfoProps {
   video: Video;
 }
 
 const VideoInfo: React.FC<VideoInfoProps> = ({ video }) => {
-  const getStatusText = (status: number) => {
-    if (status === 6) {
-      return "READY";
-    } else if (status === 5) {
-      return "PROCESSING FINAL";
-    } else if (status === 3) {
-      return "CENSORING";
-    } else if (status === 2) {
-      return "CAPTIONING DONE";
-    } else if (status === 1) {
-      return "TRANSCODING DONE";
-    } else if (status === 0) {
-      return "UPLOADED";
-    } else {
-      return "ERROR";
-    }
-  };
-
-  const getStatusBadgeClass = (status: number) => {
-    const baseClasses =
-      "px-4 py-2 rounded-full text-sm font-semibold text-white flex items-center gap-2";
-    if (status === 6) {
-      return `${baseClasses} bg-green-500`; // Everything done
-    } else if (status === 5) {
-      return `${baseClasses} bg-purple-500`; // Captioning + Censoring done
-    } else if (status === 3) {
-      return `${baseClasses} bg-blue-500`; // Transcoding + Captioning done
-    } else if (status === 2) {
-      return `${baseClasses} bg-yellow-500`; // Captioning done
-    } else if (status === 1) {
-      return `${baseClasses} bg-orange-500`; // Transcoding done
-    } else if (status === 0) {
-      return `${baseClasses} bg-gray-500`; // Just uploaded
-    } else {
-      return `${baseClasses} bg-red-500`; // Error
-    }
-  };
-
-  const getStatusIcon = (status: number) => {
-    if (status === 6) {
-      return "✅"; // Everything done
-    } else if (status === 5) {
-      return "🔍"; // Captioning + Censoring done
-    } else if (status === 3) {
-      return "📝"; // Transcoding + Captioning done
-    } else if (status === 2) {
-      return "📝"; // Captioning done
-    } else if (status === 1) {
-      return "🔄"; // Transcoding done
-    } else if (status === 0) {
-      return "⏳"; // Just uploaded
-    } else {
-      return "❌"; // Error
-    }
-  };
+  const videoStatus = getVideoStatusLarge(video);
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleString();
@@ -76,8 +23,8 @@ const VideoInfo: React.FC<VideoInfoProps> = ({ video }) => {
           </h2>
           <p className="text-gray-600">Video ID: {video.id}</p>
         </div>
-        <div className={getStatusBadgeClass(video.status)}>
-          {getStatusIcon(video.status)} {getStatusText(video.status)}
+        <div className={videoStatus.badgeClass}>
+          {videoStatus.icon} {videoStatus.text}
         </div>
       </div>
 

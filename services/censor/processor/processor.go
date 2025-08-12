@@ -26,7 +26,7 @@ var censoredWords = []string{
 func Process(
 	ctx context.Context,
 	bucketName string,
-	srtKey string,
+	vttKey string,
 	s3Client *s3.S3,
 	googleAPIKey string,
 	logger *zap.Logger,
@@ -34,14 +34,13 @@ func Process(
 	// Download SRT from S3
 	obj, err := s3Client.GetObjectWithContext(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(bucketName),
-		Key:    aws.String(srtKey),
+		Key:    aws.String(vttKey),
 	})
 	if err != nil {
 		return false, fmt.Errorf("download SRT: %w", err)
 	}
 	defer obj.Body.Close()
 
-	// Read SRT into memory (could be optimized for very large files)
 	buf := new(bytes.Buffer)
 	if _, err := io.Copy(buf, obj.Body); err != nil {
 		return false, fmt.Errorf("read SRT: %w", err)

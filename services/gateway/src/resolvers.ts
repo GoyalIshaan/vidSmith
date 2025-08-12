@@ -13,7 +13,9 @@ export const resolvers: Resolvers = {
         return videos.map((video) => ({
           id: video.id,
           videoName: video.videoName, // Map videoName to filename
-          status: video.status,
+          transcodingFinished: video.transcodingFinished,
+          captionsFinished: video.captionsFinished,
+          censorFinished: video.censorFinished,
           s3Key: video.s3Key,
           bucketName: video.bucketName,
           captionsKey: video.captionsKey,
@@ -40,7 +42,9 @@ export const resolvers: Resolvers = {
         return {
           id: video.id,
           videoName: video.videoName, // Map videoName to filename
-          status: video.status,
+          transcodingFinished: video.transcodingFinished,
+          captionsFinished: video.captionsFinished,
+          censorFinished: video.censorFinished,
           s3Key: video.s3Key,
           bucketName: video.bucketName,
           captionsKey: video.captionsKey,
@@ -108,7 +112,6 @@ export const resolvers: Resolvers = {
         );
         return {
           ...result,
-          status: result.status,
         };
       } catch (error) {
         console.error("Error completing upload:", error);
@@ -149,7 +152,9 @@ export const resolvers: Resolvers = {
   Video: {
     id: (parent) => parent.id,
     videoName: (parent) => parent.videoName,
-    status: (parent) => parent.status,
+    transcodingFinished: (parent) => parent.transcodingFinished,
+    captionsFinished: (parent) => parent.captionsFinished,
+    censorFinished: (parent) => parent.censorFinished,
     s3Key: (parent) => parent.s3Key,
     bucketName: (parent) => parent.bucketName,
     captionsKey: (parent) => parent.captionsKey,
@@ -170,7 +175,6 @@ export const resolvers: Resolvers = {
   CompleteMultipartUploadResponse: {
     videoDBID: (parent) => parent.videoDBID,
     bucketName: (parent) => parent.bucketName,
-    status: (parent) => parent.status,
   },
 
   InitiateUploadResponse: {

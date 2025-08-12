@@ -15,4 +15,5 @@ type UpdateVideoStatusEvent struct {
 	VideoId string `json:"VideoId"`
 	Phase string `json:"Phase"`
 	VTTKey string `json:"VTTKey"`
+	NoCaptions  bool   `json:"NoCaptions"`
 }

@@ -15,6 +15,13 @@
       "when": 1754955156645,
       "tag": "0001_curly_tigra",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1754996574869,
+      "tag": "0002_chemical_dormammu",
+      "breakpoints": true
     }
   ]
 }

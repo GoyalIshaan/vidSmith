@@ -100,7 +100,11 @@ func Process(
 
     if wordCount < 3 {
         logger.Info("not enough words in the video")
-        return types.CaptionsReadyEvent{}, nil
+        return types.CaptionsReadyEvent{
+            VideoId: request.VideoId,
+            S3Key: request.S3Key,
+            VTTKey: "",
+        }, nil
     }
 
     vtt, err := convertToVTT(data.Results.Items)
