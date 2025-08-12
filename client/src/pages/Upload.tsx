@@ -1,31 +1,39 @@
-import React, { useState, useRef } from "react";
-import { UploadService } from "../lib/uploadService";
+import React, { useState } from "react";
 import FileSelector from "../components/FileSelector";
 import { usePageTitle } from "../hooks/usePageTitle";
 import FileForm from "../components/FileForm";
 import UploadProgress from "../components/UploadProgress";
 import StatusMessage from "../components/StatusMessage";
-import type { UploadProgress as UploadProgressType } from "../types/graphql";
+import { useVideoStore } from "../store/videoStore";
 
 const Upload: React.FC = () => {
   usePageTitle("Upload Video");
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] =
-    useState<UploadProgressType | null>(null);
-  const [uploadStatus, setUploadStatus] = useState<string>("");
-  const [error, setError] = useState<string>("");
+
+  // Use Zustand store for all upload state
+  const {
+    isUploading,
+    uploadProgress,
+    uploadStatus,
+    uploadError,
+    uploadVideo,
+    abortUpload,
+    resetUpload,
+  } = useVideoStore();
+
+  // Local UI state
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [videoTitle, setVideoTitle] = useState<string>("");
-  const uploadServiceRef = useRef<UploadService>(new UploadService());
+  const [localError, setLocalError] = useState<string>("");
 
   const handleFileSelect = (file: File) => {
     setSelectedFile(file);
     setVideoTitle(file.name.split(".").slice(0, -1).join("."));
-    setError("");
+    setLocalError("");
+    resetUpload(); // Clear any previous upload state
   };
 
   const handleError = (errorMessage: string) => {
-    setError(errorMessage);
+    setLocalError(errorMessage);
   };
 
   const handleTitleChange = (title: string) => {
@@ -34,79 +42,39 @@ const Upload: React.FC = () => {
 
   const handleSubmitUpload = async () => {
     if (!selectedFile) {
-      setError("Please select a video file first");
+      setLocalError("Please select a video file first");
       return;
     }
 
     if (!videoTitle.trim()) {
-      setError("Please enter a video title");
+      setLocalError("Please enter a video title");
       return;
     }
 
     try {
-      setError("");
-      setUploadStatus("Validating video file...");
-      setIsUploading(true);
-      setUploadProgress(null);
+      setLocalError("");
 
-      const uploadService = uploadServiceRef.current;
+      // Use the Zustand store upload function
+      await uploadVideo(selectedFile, videoTitle.trim());
 
-      // Initiate the upload with the custom video title
-      setUploadStatus("Preparing video for upload...");
-      await uploadService.initiateUpload(selectedFile, videoTitle.trim());
-      setUploadStatus("Uploading video...");
-
-      // Upload the file with progress tracking
-      const result = await uploadService.uploadFile(
-        selectedFile,
-        (progress) => {
-          setUploadProgress(progress);
-        }
-      );
-
-      setUploadStatus(`Upload completed! Video: ${videoTitle}`);
-      setUploadProgress({
-        uploadedParts: result.videoDBID ? 1 : 0,
-        totalParts: 1,
-        percentage: 100,
-      });
-
-      // Reset everything for next upload
-      uploadService.reset();
+      // Reset local state for next upload
       setSelectedFile(null);
       setVideoTitle("");
     } catch (err) {
       console.error("Upload error:", err);
-      setError(err instanceof Error ? err.message : "Upload failed");
-      setUploadStatus("");
-
-      // Try to abort the upload if it was initiated
-      try {
-        await uploadServiceRef.current.abortUpload();
-      } catch (abortError) {
-        console.error("Failed to abort upload:", abortError);
-      }
-    } finally {
-      setIsUploading(false);
+      // Error is handled by the store, but we can also set local error if needed
     }
   };
 
   const handleRemoveFile = () => {
     setSelectedFile(null);
     setVideoTitle("");
-    setError("");
+    setLocalError("");
+    resetUpload();
   };
 
   const handleAbort = async () => {
-    try {
-      await uploadServiceRef.current.abortUpload();
-      setUploadStatus("Upload aborted");
-      setUploadProgress(null);
-      setIsUploading(false);
-      setError("");
-    } catch {
-      setError("Failed to abort upload");
-    }
+    await abortUpload();
   };
 
   return (
@@ -150,8 +118,12 @@ const Upload: React.FC = () => {
         />
       )}
 
-      {error && (
-        <StatusMessage type="error" title="Upload Failed" message={error} />
+      {(uploadError || localError) && (
+        <StatusMessage
+          type="error"
+          title="Upload Failed"
+          message={uploadError || localError}
+        />
       )}
     </div>
   );

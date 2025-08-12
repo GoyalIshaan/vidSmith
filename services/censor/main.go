@@ -79,16 +79,27 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-sigs
-		cancel()
-	}()
+
+	// Start the confirmation handler in a goroutine
+	go rabbitProducer.HandleConfirmations(ctx)
 	
 	logger.Info("censor service started, waiting for messages...")
-	err = rabbitConsumer.Consume(ctx, rabbitProducer)
-	if err != nil {
-		logger.Error("consumer error", zap.Error(err))
-	}
+	
+	// Start consumer in a goroutine
+	go func() {
+		err := rabbitConsumer.Consume(ctx, rabbitProducer)
+		if err != nil {
+			logger.Error("consumer error", zap.Error(err))
+		}
+	}()
 
-	rabbitProducer.HandleConfirmations(ctx)
+	// Wait for interrupt signal
+	<-sigs
+	logger.Info("Received shutdown signal, gracefully shutting down...")
+	
+	// Cancel context to stop all operations
+	cancel()
+	
+	logger.Info("Service stopped")
+	os.Exit(0)
 }

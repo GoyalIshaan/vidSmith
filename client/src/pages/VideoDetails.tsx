@@ -1,54 +1,100 @@
-import React, { useEffect, useState } from "react";
-import { useQuery } from "@apollo/client";
-import { gql } from "@apollo/client";
+import React, { useEffect, useState, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import type { Video } from "../types/graphql";
 import VideoPipeline from "../components/VideoPipeline";
 import VideoPlayer from "../components/VideoPlayer";
 import VideoInfo from "../components/VideoInfo";
 import Banner from "../components/Banner";
 import { usePageTitle } from "../hooks/usePageTitle";
-
-const GET_VIDEO = gql`
-  query GetVideo($id: ID!) {
-    video(id: $id) {
-      id
-      videoName
-      transcodingFinished
-      captionsFinished
-      censorFinished
-      s3Key
-      bucketName
-      captionsKey
-      manifestKey
-      thumbnailKey
-      videoDuration
-      createdAt
-    }
-  }
-`;
+import { useVideoStore } from "../store/videoStore";
 
 const VideoDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { loading, error, data, refetch } = useQuery(GET_VIDEO, {
-    variables: { id },
-    pollInterval: 3000, // Poll every 3 seconds for status updates
-    skip: !id,
-  });
-  const [video, setVideo] = useState<Video | null>(null);
+
+  // Use Zustand store with specific selectors to minimize re-renders
+  const { fetchLatestVideoById } = useVideoStore();
+
+  // Get video from store with a selector to avoid unnecessary re-renders
+  const video = useVideoStore((state) =>
+    id ? state.videos.find((v) => v.id === id) : null
+  );
+
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Set dynamic page title based on video name
   usePageTitle(video ? video.videoName : "Video Details");
 
+  // Single effect to handle video loading and polling
   useEffect(() => {
-    if (data?.video) {
-      setVideo(data.video);
-    }
-  }, [data]);
+    if (!id) return;
 
-  const handleRefresh = () => {
-    refetch();
+    // Clear any existing polling
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+
+    // Initial load
+    const loadVideo = async () => {
+      setLoading(true);
+      setError(null);
+
+      try {
+        const latestVideo = await fetchLatestVideoById(id);
+        if (!latestVideo) {
+          setError("Video not found");
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to load video");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadVideo();
+
+    // Set up polling that checks the current video state each time
+    pollIntervalRef.current = setInterval(async () => {
+      const currentVideo = useVideoStore
+        .getState()
+        .videos.find((v) => v.id === id);
+      if (!currentVideo) return;
+
+      // Only poll if video is still processing (any of these are false)
+      const isStillProcessing =
+        !currentVideo.transcodingFinished || // transcoding not done
+        !currentVideo.captionsFinished || // captions not done
+        !currentVideo.censorFinished; // censoring not done
+
+      if (isStillProcessing) {
+        await fetchLatestVideoById(id);
+      } else {
+        // All processing complete - stop polling
+        console.log(`✅ Video ${id} processing complete - stopping polling`);
+        if (pollIntervalRef.current) {
+          clearInterval(pollIntervalRef.current);
+          pollIntervalRef.current = null;
+        }
+      }
+    }, 3000);
+
+    // Cleanup function
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+    };
+  }, [id, fetchLatestVideoById]);
+
+  const handleRefresh = async () => {
+    if (id) {
+      setLoading(true);
+      await fetchLatestVideoById(id);
+      setLoading(false);
+    }
   };
 
   const handleBack = () => {
@@ -81,7 +127,7 @@ const VideoDetails: React.FC = () => {
           <div className="max-w-6xl mx-auto">
             <div className="text-center p-8 bg-white border border-red-200 rounded-lg max-w-md mx-auto">
               <p className="text-red-500 mb-4 font-medium">
-                ❌ Error loading video: {error.message}
+                ❌ Error loading video: {error}
               </p>
               <button
                 onClick={handleRefresh}

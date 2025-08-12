@@ -1,41 +1,22 @@
-import React, { useEffect, useState } from "react";
-import { useQuery } from "@apollo/client";
-import { gql } from "@apollo/client";
-import type { Video } from "../types/graphql";
+import React, { useEffect } from "react";
 import VideoCard from "../components/VideoCard";
 import { usePageTitle } from "../hooks/usePageTitle";
-
-const GET_VIDEOS = gql`
-  query GetVideos {
-    videos {
-      id
-      videoName
-      transcodingFinished
-      captionsFinished
-      censorFinished
-      s3Key
-      bucketName
-      captionsKey
-      thumbnailKey
-      videoDuration
-      createdAt
-    }
-  }
-`;
+import { useVideoStore } from "../store/videoStore";
 
 const Home: React.FC = () => {
   usePageTitle("Home");
-  const { loading, error, data, refetch } = useQuery(GET_VIDEOS);
-  const [videos, setVideos] = useState<Video[]>([]);
+
+  // Use Zustand store for all video data
+  const { videos, loading, error, fetchVideos, refetchVideos } =
+    useVideoStore();
 
   useEffect(() => {
-    if (data?.videos) {
-      setVideos(data.videos);
-    }
-  }, [data]);
+    // Fetch videos when component mounts
+    fetchVideos();
+  }, [fetchVideos]);
 
   const handleRefresh = () => {
-    refetch();
+    refetchVideos();
   };
 
   if (loading) {
@@ -54,7 +35,7 @@ const Home: React.FC = () => {
       <div className="w-full">
         <div className="text-center p-8 bg-white border border-red-200 rounded-lg max-w-md mx-auto">
           <p className="text-red-500 mb-4 font-medium">
-            ❌ Error loading videos: {error.message}
+            ❌ Error loading videos: {error}
           </p>
           <button
             onClick={handleRefresh}

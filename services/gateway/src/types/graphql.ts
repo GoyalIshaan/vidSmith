@@ -121,8 +121,7 @@ export type MutationabortMultipartUploadArgs = {
 
 export type CompleteMultipartUploadResponse = {
   __typename?: "CompleteMultipartUploadResponse";
-  videoDBID: Scalars["ID"];
-  bucketName: Scalars["String"];
+  video?: Maybe<Video>;
 };
 
 export type InitiateUploadResponse = {
@@ -414,8 +413,7 @@ export type CompleteMultipartUploadResponseResolvers<
   ParentType extends
     ResolversParentTypes["CompleteMultipartUploadResponse"] = ResolversParentTypes["CompleteMultipartUploadResponse"],
 > = {
-  videoDBID?: Resolver<ResolversTypes["ID"], ParentType, ContextType>;
-  bucketName?: Resolver<ResolversTypes["String"], ParentType, ContextType>;
+  video?: Resolver<Maybe<ResolversTypes["Video"]>, ParentType, ContextType>;
   isTypeOf?: IsTypeOfResolverFn<ParentType, ContextType>;
 };
 
@@ -533,14 +531,8 @@ export interface Loaders<
   };
 
   CompleteMultipartUploadResponse?: {
-    videoDBID?: LoaderResolver<
-      Scalars["ID"],
-      CompleteMultipartUploadResponse,
-      {},
-      TContext
-    >;
-    bucketName?: LoaderResolver<
-      Scalars["String"],
+    video?: LoaderResolver<
+      Maybe<Video>,
       CompleteMultipartUploadResponse,
       {},
       TContext

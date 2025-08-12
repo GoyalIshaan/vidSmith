@@ -111,7 +111,20 @@ export const resolvers: Resolvers = {
           parts
         );
         return {
-          ...result,
+          video: {
+            id: result.videoDetailsInDB.id,
+            videoName: result.videoDetailsInDB.videoName,
+            transcodingFinished: result.videoDetailsInDB.transcodingFinished,
+            captionsFinished: result.videoDetailsInDB.captionsFinished,
+            censorFinished: result.videoDetailsInDB.censorFinished,
+            s3Key: result.videoDetailsInDB.s3Key,
+            bucketName: result.videoDetailsInDB.bucketName,
+            captionsKey: result.videoDetailsInDB.captionsKey,
+            manifestKey: result.videoDetailsInDB.manifestKey,
+            thumbnailKey: result.videoDetailsInDB.thumbnailKey,
+            videoDuration: result.videoDetailsInDB.videoDuration,
+            createdAt: result.videoDetailsInDB.createdAt.toISOString(),
+          },
         };
       } catch (error) {
         console.error("Error completing upload:", error);
@@ -173,8 +186,7 @@ export const resolvers: Resolvers = {
   },
 
   CompleteMultipartUploadResponse: {
-    videoDBID: (parent) => parent.videoDBID,
-    bucketName: (parent) => parent.bucketName,
+    video: (parent) => parent.video,
   },
 
   InitiateUploadResponse: {

@@ -57,8 +57,20 @@ const COMPLETE_UPLOAD = gql`
       videoDBID: $videoDBID
       parts: $parts
     ) {
-      videoDBID
-      bucketName
+      video {
+        id
+        videoName
+        transcodingFinished
+        captionsFinished
+        censorFinished
+        s3Key
+        bucketName
+        captionsKey
+        manifestKey
+        thumbnailKey
+        videoDuration
+        createdAt
+      }
     }
   }
 `;

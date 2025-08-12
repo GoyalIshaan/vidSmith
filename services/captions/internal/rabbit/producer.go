@@ -64,7 +64,7 @@ func (p *Producer) PublishUpdateVideoStatus(event types.UpdateVideoStatusEvent) 
 }
 
 func (p *Producer) PublishCaptionsReady(event types.CaptionsReadyEvent) error {
-	return p.publishWithRetry("captionsReady", event, 3)
+	return p.publishWithRetry("startCensor", event, 3)
 }
 
 // publishWithRetry publishes a message with retry logic

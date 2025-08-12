@@ -115,8 +115,7 @@ export class UploadClient {
     });
 
     return {
-      videoDBID: videoDetailsInDB.id,
-      bucketName: response.Bucket!,
+      videoDetailsInDB,
     };
   }
 

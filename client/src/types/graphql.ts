@@ -27,9 +27,7 @@ export interface InitiateUploadResponse {
 }
 
 export interface CompleteMultipartUploadResponse {
-  videoDBID: string;
-  bucketName: string;
-  status: VideoStatus;
+  video: Video;
 }
 
 export interface UploadProgress {

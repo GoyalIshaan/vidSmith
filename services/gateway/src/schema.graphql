@@ -95,8 +95,7 @@ type Mutation {
 }
 
 type CompleteMultipartUploadResponse {
-  videoDBID: ID!
-  bucketName: String!
+  video: Video
 }
 
 type InitiateUploadResponse {

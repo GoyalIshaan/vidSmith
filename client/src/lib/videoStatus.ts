@@ -15,15 +15,6 @@ export interface VideoStatus {
 export function getVideoStatus(video: Video): VideoStatus {
   const { transcodingFinished, captionsFinished, censorFinished } = video;
 
-  // Status codes match the previous system for consistency
-  // 0: UPLOADED (just uploaded, nothing processed)
-  // 1: TRANSCODING DONE
-  // 2: CAPTIONING DONE
-  // 3: CENSORING (transcoding + captioning done)
-  // 4: PARTIAL PROCESSING (transcoding + censoring done, captioning failed/skipped)
-  // 5: PROCESSING FINAL (captioning + censoring done)
-  // 6: READY (everything done)
-
   const baseClasses =
     "px-3 py-1 rounded-full text-xs font-semibold text-white flex items-center gap-1";
 
