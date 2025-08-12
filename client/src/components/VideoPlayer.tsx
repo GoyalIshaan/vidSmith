@@ -317,36 +317,111 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
         {/* Quality Selector */}
         {availableQualities.length > 1 && (
-          <div className="absolute top-2 right-2 z-30 quality-selector">
+          <div className="absolute top-3 right-3 z-30 quality-selector">
             <button
               onClick={() => setShowQualityMenu(!showQualityMenu)}
-              className="bg-black/70 text-white px-3 py-1 rounded text-sm font-medium hover:bg-black/90 transition-colors"
+              className="group flex items-center gap-2 bg-black/80 backdrop-blur-sm text-white px-3 py-2 rounded-lg text-sm font-medium hover:bg-black/90 transition-all duration-200 border border-white/10 shadow-lg"
             >
-              {selectedQuality !== null && availableQualities[selectedQuality]
-                ? `${availableQualities[selectedQuality].height}p`
-                : "Quality"}
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+                />
+              </svg>
+              <span>
+                {selectedQuality !== null && availableQualities[selectedQuality]
+                  ? `${availableQualities[selectedQuality].height}p`
+                  : "Auto"}
+              </span>
+              <svg
+                className={`w-3 h-3 transition-transform duration-200 ${
+                  showQualityMenu ? "rotate-180" : ""
+                }`}
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M19 9l-7 7-7-7"
+                />
+              </svg>
             </button>
 
             {showQualityMenu && (
-              <div className="absolute top-full right-0 mt-1 bg-black/90 text-white rounded shadow-lg min-w-[120px]">
-                {availableQualities.map((quality, index) => (
+              <div className="absolute top-full right-0 mt-2 bg-black/95 backdrop-blur-md text-white rounded-xl shadow-2xl border border-white/10 overflow-hidden min-w-[160px] animate-in slide-in-from-top-2 duration-200">
+                <div className="p-2">
+                  <div className="text-xs font-medium text-gray-300 px-3 py-2 border-b border-white/10 mb-1">
+                    Select Quality
+                  </div>
+
+                  {/* Auto quality option */}
                   <button
-                    key={index}
                     onClick={() => {
-                      setSelectedQuality(index);
+                      setSelectedQuality(-1);
                       setShowQualityMenu(false);
-                      // Change quality in HLS.js
                       if (hlsInstance && strategy === "hls-js") {
-                        hlsInstance.currentLevel = index;
+                        hlsInstance.currentLevel = -1; // Auto quality
                       }
                     }}
-                    className={`w-full text-left px-3 py-2 text-sm hover:bg-white/20 transition-colors ${
-                      selectedQuality === index ? "bg-red-500" : ""
+                    className={`w-full flex items-center justify-between px-3 py-2.5 text-sm hover:bg-white/10 rounded-lg transition-all duration-150 group ${
+                      selectedQuality === -1
+                        ? "bg-red-500/20 text-red-400"
+                        : "text-white"
                     }`}
                   >
-                    {quality.height}p ({Math.round(quality.bitrate / 1000)}kbps)
+                    <div className="flex items-center gap-2">
+                      <div
+                        className={`w-2 h-2 rounded-full ${
+                          selectedQuality === -1 ? "bg-red-400" : "bg-gray-500"
+                        }`}
+                      />
+                      <span className="font-medium">Auto</span>
+                    </div>
+                    <span className="text-xs text-gray-400">Adaptive</span>
                   </button>
-                ))}
+
+                  {availableQualities.map((quality, index) => (
+                    <button
+                      key={index}
+                      onClick={() => {
+                        setSelectedQuality(index);
+                        setShowQualityMenu(false);
+                        if (hlsInstance && strategy === "hls-js") {
+                          hlsInstance.currentLevel = index;
+                        }
+                      }}
+                      className={`w-full flex items-center justify-between px-3 py-2.5 text-sm hover:bg-white/10 rounded-lg transition-all duration-150 group ${
+                        selectedQuality === index
+                          ? "bg-red-500/20 text-red-400"
+                          : "text-white"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <div
+                          className={`w-2 h-2 rounded-full ${
+                            selectedQuality === index
+                              ? "bg-red-400"
+                              : "bg-gray-500"
+                          }`}
+                        />
+                        <span className="font-medium">{quality.height}p</span>
+                      </div>
+                      <span className="text-xs text-gray-400">
+                        {Math.round(quality.bitrate / 1000)}k
+                      </span>
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
           </div>
