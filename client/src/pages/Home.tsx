@@ -14,6 +14,8 @@ const GET_VIDEOS = gql`
       s3Key
       bucketName
       captionsKey
+      thumbnailKey
+      videoDuration
       createdAt
     }
   }
