@@ -177,7 +177,6 @@ export const useVideoStore = create<VideoState>()(
                 currentVideo.captionsFinished !==
                   result.data.captionsFinished ||
                 currentVideo.censorFinished !== result.data.censorFinished ||
-                currentVideo.s3Key !== result.data.s3Key ||
                 currentVideo.captionsKey !== result.data.captionsKey ||
                 currentVideo.manifestKey !== result.data.manifestKey ||
                 currentVideo.thumbnailKey !== result.data.thumbnailKey ||

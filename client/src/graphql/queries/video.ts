@@ -8,8 +8,6 @@ export const VIDEO_FIELDS = gql`
     transcodingFinished
     captionsFinished
     censorFinished
-    s3Key
-    bucketName
     captionsKey
     manifestKey
     thumbnailKey

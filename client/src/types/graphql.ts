@@ -4,8 +4,6 @@ export interface Video {
   transcodingFinished: boolean;
   captionsFinished: boolean;
   censorFinished: boolean;
-  s3Key?: string;
-  bucketName?: string;
   captionsKey?: string;
   manifestKey?: string;
   thumbnailKey?: string;

@@ -35,25 +35,9 @@ const VideoInfo: React.FC<VideoInfoProps> = ({ video }) => {
             <span className="font-semibold text-gray-900">Uploaded:</span>
             <span className="text-gray-700">{formatDate(video.createdAt)}</span>
           </div>
-
-          {video.bucketName && (
-            <div className="flex justify-between">
-              <span className="font-semibold text-gray-900">Bucket:</span>
-              <span className="text-gray-700">{video.bucketName}</span>
-            </div>
-          )}
         </div>
 
         <div className="space-y-3">
-          {video.s3Key && (
-            <div className="flex justify-between items-center">
-              <span className="font-semibold text-gray-900">S3 Key:</span>
-              <span className="text-gray-700 font-mono text-xs bg-gray-100 border border-gray-200 px-2 py-1 rounded break-all max-w-xs">
-                {video.s3Key}
-              </span>
-            </div>
-          )}
-
           {video.captionsKey && (
             <div className="flex justify-between items-center">
               <span className="font-semibold text-gray-900">Captions:</span>
