@@ -1,50 +1,45 @@
 import React from "react";
 import type { Video } from "../types/graphql";
-import { getVideoStatusLarge } from "../lib/videoStatus";
 
 interface VideoInfoProps {
   video: Video;
 }
 
 const VideoInfo: React.FC<VideoInfoProps> = ({ video }) => {
-  const videoStatus = getVideoStatusLarge(video);
-
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleString();
+    return new Date(dateString).toLocaleDateString();
   };
 
+  const formatDuration = (seconds?: number) => {
+    if (!seconds) return null;
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+
+    if (hours > 0) {
+      return `${hours}:${minutes.toString().padStart(2, "0")}:${secs
+        .toString()
+        .padStart(2, "0")}`;
+    }
+    return `${minutes}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  const duration = formatDuration(video.videoDuration);
+
   return (
-    <div className="bg-white border border-gray-200 rounded-lg p-8">
-      {/* Header with title and status */}
-      <div className="flex justify-between items-start mb-6">
+    <div className="bg-white border border-gray-200 rounded-lg p-4">
+      <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-gray-900 text-2xl font-bold mb-2">
-            {video.videoName}
-          </h2>
-          <p className="text-gray-600">Video ID: {video.id}</p>
+          <h2 className="text-xl font-bold text-gray-900">{video.videoName}</h2>
+          <p className="text-xs text-gray-500 font-mono">ID: {video.id}</p>
         </div>
-        <div className={videoStatus.badgeClass}>
-          {videoStatus.icon} {videoStatus.text}
-        </div>
-      </div>
-
-      {/* Video metadata grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="space-y-3">
-          <div className="flex justify-between">
-            <span className="font-semibold text-gray-900">Uploaded:</span>
-            <span className="text-gray-700">{formatDate(video.createdAt)}</span>
-          </div>
-        </div>
-
-        <div className="space-y-3">
-          {video.captionsKey && (
-            <div className="flex justify-between items-center">
-              <span className="font-semibold text-gray-900">Captions:</span>
-              <span className="text-gray-700 font-mono text-xs bg-gray-100 border border-gray-200 px-2 py-1 rounded break-all max-w-xs">
-                {video.captionsKey}
-              </span>
-            </div>
+        <div className="flex items-center gap-4 text-sm text-gray-600">
+          <span>Uploaded: {formatDate(video.createdAt)}</span>
+          {duration && (
+            <>
+              <span>•</span>
+              <span>Duration: {duration}</span>
+            </>
           )}
         </div>
       </div>

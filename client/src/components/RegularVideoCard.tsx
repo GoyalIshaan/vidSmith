@@ -1,6 +1,5 @@
 import { useNavigate } from "react-router-dom";
 import type { Video } from "../types/graphql";
-import { getVideoStatus } from "../lib/videoStatus";
 
 interface RegularVideoCardProps {
   video: Video;
@@ -8,7 +7,6 @@ interface RegularVideoCardProps {
 
 const RegularVideoCard: React.FC<RegularVideoCardProps> = ({ video }) => {
   const navigate = useNavigate();
-  const videoStatus = getVideoStatus(video);
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleString();
@@ -24,9 +22,6 @@ const RegularVideoCard: React.FC<RegularVideoCardProps> = ({ video }) => {
       <div className="mb-3">
         <div className="text-sm font-medium text-black mb-2 line-clamp-2">
           {video.videoName}
-        </div>
-        <div className={videoStatus.badgeClass}>
-          {videoStatus.icon} {videoStatus.text}
         </div>
       </div>
 

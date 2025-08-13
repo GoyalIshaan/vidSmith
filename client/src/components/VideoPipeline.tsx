@@ -1,14 +1,12 @@
 import React from "react";
 import type { Video } from "../types/graphql";
-import { getVideoStatus } from "../lib/videoStatus";
 
 interface VideoPipelineProps {
   video: Video;
   videoName: string;
 }
 
-const VideoPipeline: React.FC<VideoPipelineProps> = ({ video, videoName }) => {
-  const videoStatus = getVideoStatus(video);
+const VideoPipeline: React.FC<VideoPipelineProps> = ({ video }) => {
   const { transcodingFinished, captionsFinished, censorFinished } = video;
 
   const getPhaseStatus = (phase: string) => {
@@ -105,7 +103,7 @@ const VideoPipeline: React.FC<VideoPipelineProps> = ({ video, videoName }) => {
   return (
     <div className="bg-white border border-black rounded-xl p-6 mt-4">
       <h4 className="text-black font-semibold mb-4 flex items-center gap-2">
-        🚀 Processing Pipeline: {videoName}
+        🚀 Processing Pipeline:
       </h4>
 
       {/* All phases in one horizontal line */}
@@ -125,12 +123,6 @@ const VideoPipeline: React.FC<VideoPipelineProps> = ({ video, videoName }) => {
             )}
           </React.Fragment>
         ))}
-      </div>
-
-      <div className="mt-4 text-center">
-        <div className="text-sm text-gray-600">
-          Status: {videoStatus.text} | Current Phase: {videoStatus.text}
-        </div>
       </div>
     </div>
   );

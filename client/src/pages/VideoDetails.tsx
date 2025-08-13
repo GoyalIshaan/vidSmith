@@ -225,6 +225,11 @@ const VideoDetails: React.FC = () => {
             </button>
           </div>
 
+          {/* Video Info Card */}
+          <div className="mb-8">
+            <VideoInfo video={video} />
+          </div>
+
           {/* Processing Status */}
           <div className="bg-white border border-gray-200 rounded-lg p-8 mb-8">
             <div className="text-center">
@@ -237,11 +242,6 @@ const VideoDetails: React.FC = () => {
                 usually takes a few minutes.
               </p>
             </div>
-          </div>
-
-          {/* Video Info Card */}
-          <div className="mb-8">
-            <VideoInfo video={video} />
           </div>
 
           {/* Pipeline Component - Show processing details */}
