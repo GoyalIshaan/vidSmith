@@ -14,13 +14,13 @@ const RegularVideoCard: React.FC<RegularVideoCardProps> = ({ video }) => {
 
   return (
     <div
-      className="bg-white border border-gray-200 rounded-lg p-4 transition-all duration-200 hover:shadow-lg relative overflow-hidden cursor-pointer"
+      className="bg-white border border-gray-200 rounded-lg p-3 sm:p-4 transition-all duration-200 hover:shadow-lg relative overflow-hidden cursor-pointer"
       onClick={() => navigate(`/video/${video.id}`)}
     >
       <div className="absolute top-0 left-0 right-0 h-1 bg-red-500"></div>
 
-      <div className="mb-3">
-        <div className="text-sm font-medium text-black mb-2 line-clamp-2">
+      <div className="mb-2 sm:mb-3">
+        <div className="text-xs sm:text-sm font-medium text-black mb-1 sm:mb-2 line-clamp-2">
           {video.videoName}
         </div>
       </div>

@@ -73,28 +73,31 @@ const Home: React.FC = () => {
 
   return (
     <div className="w-full max-w-none">
-      <div className="flex items-center gap-4 mb-6">
-        <h2 className="text-gray-500 text-lg font-normal border-b border-gray-300 pb-1">
+      {/* Header section - mobile responsive */}
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 mb-6">
+        <h2 className="text-gray-500 text-lg font-normal border-b border-gray-300 pb-1 flex-grow">
           All Public Videos
         </h2>
         <button
           onClick={handleRefresh}
-          className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1 rounded text-sm font-medium transition-all duration-200 flex items-center gap-1"
+          className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1 sm:px-4 sm:py-2 rounded text-sm font-medium transition-all duration-200 flex items-center justify-center gap-1 sm:gap-2 self-start sm:self-auto"
         >
-          🔄 Refresh
+          🔄 <span className="hidden sm:inline">Refresh</span>
         </button>
       </div>
 
       {videos.length === 0 ? (
-        <div className="text-center py-16 bg-white rounded-xl border-2 border-dashed border-black">
-          <div className="text-6xl mb-4 opacity-50">📹</div>
-          <h3 className="text-black text-xl font-semibold mb-2">
+        <div className="text-center py-12 sm:py-16 bg-white rounded-xl border-2 border-dashed border-black mx-2 sm:mx-0">
+          <div className="text-4xl sm:text-6xl mb-4 opacity-50">📹</div>
+          <h3 className="text-black text-lg sm:text-xl font-semibold mb-2 px-4">
             No videos uploaded yet
           </h3>
-          <p className="text-black">Upload your first video to get started!</p>
+          <p className="text-black text-sm sm:text-base px-4">
+            Upload your first video to get started!
+          </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-3 sm:gap-3 md:gap-4">
           {videos.map((video) => (
             <VideoCard key={video.id} video={video} />
           ))}

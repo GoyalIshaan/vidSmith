@@ -50,8 +50,10 @@ function Layout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-gray-50">
       <Banner />
-      {/* Main content area */}
-      <main className="w-full px-6 py-6">{children}</main>
+      {/* Main content area - responsive padding */}
+      <main className="w-full px-4 py-4 sm:px-6 sm:py-6 max-w-full overflow-x-hidden">
+        {children}
+      </main>
     </div>
   );
 }

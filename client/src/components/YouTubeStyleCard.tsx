@@ -65,8 +65,8 @@ const YouTubeStyleCard: React.FC<YouTubeStyleCardProps> = ({ video }) => {
       </div>
 
       {/* Video info */}
-      <div className="p-3">
-        <h3 className="text-sm font-medium text-black mb-1 line-clamp-2 leading-tight">
+      <div className="p-2 sm:p-3">
+        <h3 className="text-xs sm:text-sm font-medium text-black mb-1 line-clamp-2 leading-tight">
           {video.videoName}
         </h3>
         <p className="text-xs text-gray-500">{formatDate(video.createdAt)}</p>
