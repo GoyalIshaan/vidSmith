@@ -9,65 +9,57 @@ import { eq, sql } from "drizzle-orm";
 import { s3Client } from "../aws/s3Client";
 import { DeleteObjectCommand } from "@aws-sdk/client-s3";
 
-function deleteOriginalFileIfProcessingComplete(videoId: string) {
-  (async () => {
-    try {
-      const video = await withDBRetry(() =>
-        DB.select()
-          .from(videosTable)
-          .where(eq(videosTable.id, videoId))
-          .limit(1)
+async function deleteOriginalFileIfProcessingComplete(videoId: string) {
+  try {
+    const video = await withDBRetry(() =>
+      DB.select().from(videosTable).where(eq(videosTable.id, videoId)).limit(1)
+    );
+
+    if (!video.length) {
+      console.log(`❌ Video ${videoId} not found in database`);
+      return;
+    }
+
+    const videoData = video[0];
+
+    if (videoData.captionsFinished && videoData.transcodingFinished) {
+      console.log(
+        `🗑️ Both captions and transcoding finished for ${videoId}, deleting original file`
       );
 
-      if (!video.length) {
-        console.log(`❌ Video ${videoId} not found in database`);
+      if (!videoData.s3Key) {
+        console.log(
+          `⚠️ No s3Key found for video ${videoId}, skipping deletion`
+        );
         return;
       }
 
-      const videoData = video[0];
-
-      if (videoData.captionsFinished && videoData.transcodingFinished) {
-        console.log(
-          `🗑️ Both captions and transcoding finished for ${videoId}, deleting original file`
-        );
-
-        if (!videoData.s3Key) {
-          console.log(
-            `⚠️ No s3Key found for video ${videoId}, skipping deletion`
-          );
-          return;
-        }
-
-        const bucketName =
-          process.env.AWS_BUCKET_NAME || process.env.BUCKET_NAME;
-        if (!bucketName) {
-          console.error(
-            "❌ No bucket name configured in environment variables"
-          );
-          return;
-        }
-
-        const deleteCommand = new DeleteObjectCommand({
-          Bucket: bucketName,
-          Key: videoData.s3Key,
-        });
-
-        await s3Client.send(deleteCommand);
-        console.log(
-          `✅ Successfully deleted original file: ${videoData.s3Key} from bucket: ${bucketName}`
-        );
-      } else {
-        console.log(
-          `⏳ Video ${videoId} processing not complete yet - Captions: ${videoData.captionsFinished}, Transcoding: ${videoData.transcodingFinished}`
-        );
+      const bucketName = process.env.AWS_BUCKET_NAME || process.env.BUCKET_NAME;
+      if (!bucketName) {
+        console.error("❌ No bucket name configured in environment variables");
+        return;
       }
-    } catch (error) {
-      console.error(
-        `❌ Error deleting original file for video ${videoId}:`,
-        error
+
+      const deleteCommand = new DeleteObjectCommand({
+        Bucket: bucketName,
+        Key: videoData.s3Key,
+      });
+
+      await s3Client.send(deleteCommand);
+      console.log(
+        `✅ Successfully deleted original file: ${videoData.s3Key} from bucket: ${bucketName}`
+      );
+    } else {
+      console.log(
+        `⏳ Video ${videoId} processing not complete yet - Captions: ${videoData.captionsFinished}, Transcoding: ${videoData.transcodingFinished}`
       );
     }
-  })();
+  } catch (error) {
+    console.error(
+      `❌ Error deleting original file for video ${videoId}:`,
+      error
+    );
+  }
 
   console.log(`🔥 Started background deletion check for video ${videoId}`);
 }
