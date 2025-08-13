@@ -40,9 +40,11 @@ async function deleteOriginalFileIfProcessingComplete(videoId: string) {
         return;
       }
 
+      const originalFileKey = `originals/${videoData.s3Key}`;
+
       const deleteCommand = new DeleteObjectCommand({
         Bucket: bucketName,
-        Key: videoData.s3Key,
+        Key: originalFileKey,
       });
 
       await s3Client.send(deleteCommand);
@@ -89,7 +91,6 @@ export async function captionsMessageHandler(message: captionsUpdateMessage) {
     updatedAt: new Date(),
   };
 
-  // Only set captionsKey if VTTKey is provided and not empty
   if (message.VTTKey && message.VTTKey.trim() !== "") {
     updateData.captionsKey = message.VTTKey;
     console.log("Setting captions key:", message.VTTKey);
@@ -108,7 +109,6 @@ export async function captionsMessageHandler(message: captionsUpdateMessage) {
 
   console.log("Captions handler result:", result[0]);
 
-  // Check if we should delete the original file now that captions are done (fire and forget)
   deleteOriginalFileIfProcessingComplete(message.VideoId);
 
   return result[0];
@@ -130,7 +130,6 @@ export async function transcoderMessageHandler(
       .returning()
   );
 
-  // Check if we should delete the original file now that transcoding is done (fire and forget)
   deleteOriginalFileIfProcessingComplete(message.VideoId);
 
   return result[0];
