@@ -22,7 +22,7 @@ spec:
     spec:
       containers:
         - name: captions
-          image: 872515258753.dkr.ecr.us-east-2.amazonaws.com/captions:captions-1.0
+          image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/captions:${IMAGE_TAG}
           imagePullPolicy: Always
           ports:
             - name: container-port

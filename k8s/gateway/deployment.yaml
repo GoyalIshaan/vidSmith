@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
         - name: gateway
-          image: 872515258753.dkr.ecr.us-east-2.amazonaws.com/gateway:gateway-1.0
+          image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/gateway:${IMAGE_TAG}
           imagePullPolicy: Always
           ports:
             - name: http
