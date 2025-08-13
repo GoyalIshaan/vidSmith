@@ -6,6 +6,7 @@ import Home from "./pages/Home";
 import Upload from "./pages/Upload";
 import About from "./pages/About";
 import VideoDetails from "./pages/VideoDetails";
+import NotFound from "./pages/NotFound";
 
 function App() {
   return (
@@ -37,6 +38,8 @@ function App() {
             }
           />
           <Route path="/video/:id" element={<VideoDetails />} />
+          {/* Catch-all route for 404 - must be last */}
+          <Route path="*" element={<NotFound />} />
         </Routes>
       </Router>
     </ApolloProvider>
