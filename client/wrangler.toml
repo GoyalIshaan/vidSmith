@@ -3,6 +3,3 @@ compatibility_date = "2025-08-13"
 
 # Cloudflare Pages configuration
 pages_build_output_dir = "./dist"
-
-[assets]
-directory = "./dist"
