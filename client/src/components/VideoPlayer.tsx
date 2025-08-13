@@ -180,7 +180,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           setSelectedQuality(hls.currentLevel);
         });
 
-        hls.on(Hls.Events.LEVEL_SWITCHED, (event, data) => {
+        hls.on(Hls.Events.LEVEL_SWITCHED, (_, data) => {
           setSelectedQuality(data.level);
         });
 

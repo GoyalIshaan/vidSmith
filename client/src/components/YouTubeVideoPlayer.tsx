@@ -189,7 +189,7 @@ const YouTubeVideoPlayer: React.FC<YouTubeVideoPlayerProps> = ({
                       <span>Format:</span>
                       <span>HLS Streaming</span>
                     </div>
-                    {video.s3Key && (
+                    {video.manifestKey && (
                       <div className="flex justify-between">
                         <span>Storage:</span>
                         <span className="text-green-600">Optimized</span>
@@ -288,7 +288,7 @@ const YouTubeVideoPlayer: React.FC<YouTubeVideoPlayerProps> = ({
                         ✓ Enabled
                       </span>
                     </div>
-                    {video.s3Key && (
+                    {video.manifestKey && (
                       <div className="flex justify-between items-center">
                         <span>Storage:</span>
                         <span className="text-green-600 font-medium">
