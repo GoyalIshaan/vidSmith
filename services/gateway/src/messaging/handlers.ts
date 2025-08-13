@@ -10,10 +10,8 @@ import { s3Client } from "../aws/s3Client";
 import { DeleteObjectCommand } from "@aws-sdk/client-s3";
 
 function deleteOriginalFileIfProcessingComplete(videoId: string) {
-  // Fire and forget - start the async operation but don't wait for it
   (async () => {
     try {
-      // Get the current video data to check processing status
       const video = await withDBRetry(() =>
         DB.select()
           .from(videosTable)
@@ -28,7 +26,6 @@ function deleteOriginalFileIfProcessingComplete(videoId: string) {
 
       const videoData = video[0];
 
-      // Check if both captions and transcoding are finished
       if (videoData.captionsFinished && videoData.transcodingFinished) {
         console.log(
           `🗑️ Both captions and transcoding finished for ${videoId}, deleting original file`
@@ -41,7 +38,6 @@ function deleteOriginalFileIfProcessingComplete(videoId: string) {
           return;
         }
 
-        // Delete the original file from S3
         const bucketName =
           process.env.AWS_BUCKET_NAME || process.env.BUCKET_NAME;
         if (!bucketName) {
@@ -70,11 +66,9 @@ function deleteOriginalFileIfProcessingComplete(videoId: string) {
         `❌ Error deleting original file for video ${videoId}:`,
         error
       );
-      // Don't throw the error - we don't want to fail the main processing if cleanup fails
     }
-  })(); // Immediately invoke the async function
+  })();
 
-  // Return immediately without waiting for the deletion to complete
   console.log(`🔥 Started background deletion check for video ${videoId}`);
 }
 
