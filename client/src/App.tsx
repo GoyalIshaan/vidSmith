@@ -1,6 +1,6 @@
 import { ApolloProvider } from "@apollo/client";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
-import { client } from "./lib/apollo";
+import { apolloClient } from "./graphql/client";
 import Banner from "./components/Banner";
 import Home from "./pages/Home";
 import Upload from "./pages/Upload";
@@ -9,7 +9,7 @@ import VideoDetails from "./pages/VideoDetails";
 
 function App() {
   return (
-    <ApolloProvider client={client}>
+    <ApolloProvider client={apolloClient}>
       <Router>
         <Routes>
           <Route

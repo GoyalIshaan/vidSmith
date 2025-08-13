@@ -1,8 +1,14 @@
 import { create } from "zustand";
 import { devtools } from "zustand/middleware";
 import { fetchAllVideos, clearVideoCache, fetchVideoById } from "../graphql";
-import { UploadService } from "../lib/uploadService";
-import type { Video, UploadProgress } from "../types/graphql";
+import {
+  initiateMultipartUpload,
+  generateUploadPartUrl,
+  completeMultipartUpload,
+  abortMultipartUpload,
+} from "../graphql/api/uploadApi";
+
+import type { Video, UploadProgress, PartInput } from "../types/graphql";
 
 export interface VideoState {
   // State
@@ -44,8 +50,65 @@ export interface VideoState {
 export const useVideoStore = create<VideoState>()(
   devtools(
     (set, get) => {
-      // Create a single upload service instance
-      const uploadService = new UploadService();
+      // Upload state tracking
+      let uploadState: {
+        uploadId: string | null;
+        videoDBID: string | null;
+        key: string | null;
+        uploadedParts: PartInput[];
+      } = {
+        uploadId: null,
+        videoDBID: null,
+        key: null,
+        uploadedParts: [],
+      };
+
+      const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks
+
+      // Helper functions
+      const createChunks = (file: File): Blob[] => {
+        const chunks: Blob[] = [];
+        let start = 0;
+        while (start < file.size) {
+          const end = Math.min(start + CHUNK_SIZE, file.size);
+          chunks.push(file.slice(start, end));
+          start = end;
+        }
+        return chunks;
+      };
+
+      const uploadChunk = async (
+        presignedUrl: string,
+        chunk: Blob
+      ): Promise<string> => {
+        const response = await fetch(presignedUrl, {
+          method: "PUT",
+          body: chunk,
+          headers: {
+            "Content-Type": "application/octet-stream",
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to upload chunk: ${response.statusText}`);
+        }
+
+        const etag = response.headers.get("ETag");
+        if (!etag) {
+          throw new Error("No ETag received from S3");
+        }
+
+        return etag.replace(/"/g, "");
+      };
+
+      const resetUploadState = () => {
+        uploadState = {
+          uploadId: null,
+          videoDBID: null,
+          key: null,
+          uploadedParts: [],
+        };
+      };
 
       return {
         // Initial state
@@ -186,29 +249,104 @@ export const useVideoStore = create<VideoState>()(
               uploadProgress: null,
             });
 
+            // Validate video file
+            if (!file.type.startsWith("video/")) {
+              throw new Error("Selected file is not a valid video format");
+            }
+            if (file.size < 1024) {
+              throw new Error("Video file is too small or corrupted");
+            }
+
             // Initiate the upload
             set({ uploadStatus: "Preparing video for upload..." });
-            await uploadService.initiateUpload(file, videoTitle.trim());
+            const initiateResult = await initiateMultipartUpload({
+              videoName: videoTitle.trim(),
+              fileName: file.name,
+              contentType: file.type,
+              size: file.size,
+            });
+
+            if (initiateResult.error || !initiateResult.data) {
+              throw new Error(
+                initiateResult.error || "Failed to initiate upload"
+              );
+            }
+
+            uploadState.uploadId = initiateResult.data.uploadId;
+            uploadState.videoDBID = initiateResult.data.videoDBID;
+            uploadState.key = initiateResult.data.key;
+            uploadState.uploadedParts = [];
 
             set({ uploadStatus: "Uploading video..." });
 
-            // Upload the file with progress tracking
-            const result = await uploadService.uploadFile(file, (progress) => {
-              set({ uploadProgress: progress });
+            // Create chunks and upload
+            const chunks = createChunks(file);
+            const totalParts = chunks.length;
+
+            for (let i = 0; i < chunks.length; i++) {
+              const partNumber = i + 1;
+              const chunk = chunks[i];
+
+              // Get presigned URL for this part
+              const urlResult = await generateUploadPartUrl({
+                key: uploadState.key!,
+                uploadId: uploadState.uploadId!,
+                partNumber,
+              });
+
+              if (urlResult.error || !urlResult.data) {
+                throw new Error(
+                  urlResult.error ||
+                    `Failed to generate URL for part ${partNumber}`
+                );
+              }
+
+              // Upload the chunk
+              const etag = await uploadChunk(urlResult.data, chunk);
+              uploadState.uploadedParts.push({
+                ETag: etag,
+                PartNumber: partNumber,
+              });
+
+              // Update progress
+              set({
+                uploadProgress: {
+                  uploadedParts: uploadState.uploadedParts.length,
+                  totalParts,
+                  percentage: Math.round(
+                    (uploadState.uploadedParts.length / totalParts) * 100
+                  ),
+                  currentPart: partNumber,
+                },
+              });
+            }
+
+            // Complete the upload
+            const completeResult = await completeMultipartUpload({
+              key: uploadState.key!,
+              uploadId: uploadState.uploadId!,
+              videoDBID: uploadState.videoDBID!,
+              parts: uploadState.uploadedParts,
             });
+
+            if (completeResult.error || !completeResult.data) {
+              throw new Error(
+                completeResult.error || "Failed to complete upload"
+              );
+            }
 
             set({
               uploadStatus: `Upload completed! Video: ${videoTitle}`,
               uploadProgress: {
-                uploadedParts: 1,
-                totalParts: 1,
+                uploadedParts: totalParts,
+                totalParts,
                 percentage: 100,
+                currentPart: totalParts,
               },
             });
 
             // Add the completed video to the store
-            // Use the video object returned from the backend
-            const newVideo: Video = result.video;
+            const newVideo: Video = completeResult.data.video;
 
             // Add to videos list and invalidate cache to refetch
             set((state) => ({
@@ -218,8 +356,8 @@ export const useVideoStore = create<VideoState>()(
 
             console.log(`✅ Video uploaded and added to store: ${videoTitle}`);
 
-            // Reset upload service for next upload
-            uploadService.reset();
+            // Reset upload state for next upload
+            resetUploadState();
           } catch (err) {
             console.error("Upload error:", err);
             const errorMessage =
@@ -230,11 +368,22 @@ export const useVideoStore = create<VideoState>()(
             });
 
             // Try to abort the upload if it was initiated
-            try {
-              await uploadService.abortUpload();
-            } catch (abortError) {
-              console.error("Failed to abort upload:", abortError);
+            if (
+              uploadState.uploadId &&
+              uploadState.videoDBID &&
+              uploadState.key
+            ) {
+              try {
+                await abortMultipartUpload({
+                  key: uploadState.key,
+                  uploadId: uploadState.uploadId,
+                  videoDBID: uploadState.videoDBID,
+                });
+              } catch (abortError) {
+                console.error("Failed to abort upload:", abortError);
+              }
             }
+            resetUploadState();
           } finally {
             set({ isUploading: false });
           }
@@ -242,7 +391,18 @@ export const useVideoStore = create<VideoState>()(
 
         abortUpload: async () => {
           try {
-            await uploadService.abortUpload();
+            if (
+              uploadState.uploadId &&
+              uploadState.videoDBID &&
+              uploadState.key
+            ) {
+              await abortMultipartUpload({
+                key: uploadState.key,
+                uploadId: uploadState.uploadId,
+                videoDBID: uploadState.videoDBID,
+              });
+            }
+            resetUploadState();
             set({
               uploadStatus: "Upload aborted",
               uploadProgress: null,
@@ -257,7 +417,7 @@ export const useVideoStore = create<VideoState>()(
         },
 
         resetUpload: () => {
-          uploadService.reset();
+          resetUploadState();
           set({
             isUploading: false,
             uploadProgress: null,
