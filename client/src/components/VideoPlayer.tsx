@@ -70,7 +70,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   );
   const warn = useCallback(
     (...args: unknown[]) => debug && console.warn("[VideoPlayer]", ...args),
-    []
+    [debug]
   );
   const err = useCallback(
     (...args: unknown[]) => console.error("[VideoPlayer]", ...args),

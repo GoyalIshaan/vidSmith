@@ -21,7 +21,7 @@ const VideoDetails: React.FC = () => {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const pollIntervalRef = useRef<number | null>(null);
 
   // Check if video processing is complete
   const isProcessingComplete =
@@ -109,7 +109,7 @@ const VideoDetails: React.FC = () => {
             pollIntervalRef.current = null;
           }
         }
-      }, 3000);
+      }, 3000) as unknown as number;
     }
 
     // Cleanup function

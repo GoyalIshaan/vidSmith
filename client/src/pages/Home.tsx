@@ -10,7 +10,7 @@ const Home: React.FC = () => {
   const { videos, loading, error, fetchVideos, refetchVideos, isDataStale } =
     useVideoStore();
 
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const intervalRef = useRef<number | null>(null);
 
   useEffect(() => {
     // Fetch videos when component mounts
@@ -25,7 +25,10 @@ const Home: React.FC = () => {
     };
 
     // Check immediately and then every 2 minutes
-    intervalRef.current = setInterval(checkAndRefresh, 2 * 60 * 1000);
+    intervalRef.current = setInterval(
+      checkAndRefresh,
+      2 * 60 * 1000
+    ) as unknown as number;
 
     // Cleanup interval on unmount
     return () => {
