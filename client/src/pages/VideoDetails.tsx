@@ -43,27 +43,49 @@ const VideoDetails: React.FC = () => {
       pollIntervalRef.current = null;
     }
 
-    // Initial load
-    const loadVideo = async () => {
-      setLoading(true);
-      setError(null);
+    // Check if we already have the video in store
+    const currentVideo = useVideoStore
+      .getState()
+      .videos.find((v) => v.id === id);
 
-      try {
-        const latestVideo = await fetchLatestVideoById(id);
-        if (!latestVideo) {
-          setError("Video not found");
+    // Only fetch if video is missing from store OR if processing is incomplete
+    const currentProcessingComplete =
+      currentVideo &&
+      currentVideo.transcodingFinished &&
+      currentVideo.captionsFinished &&
+      currentVideo.censorFinished;
+    const needsLoading = !currentVideo || !currentProcessingComplete;
+
+    if (needsLoading) {
+      // Initial load
+      const loadVideo = async () => {
+        setLoading(true);
+        setError(null);
+
+        try {
+          const latestVideo = await fetchLatestVideoById(id);
+          if (!latestVideo) {
+            setError("Video not found");
+          }
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Failed to load video");
+        } finally {
+          setLoading(false);
         }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load video");
-      } finally {
-        setLoading(false);
-      }
-    };
+      };
 
-    loadVideo();
+      loadVideo();
+    } else {
+      // Video is already in store and processing is complete, no need to load
+      console.log(
+        `✅ Video ${id} already in store and processing complete - skipping fetch`
+      );
+      setLoading(false);
+      setError(null);
+    }
 
     // Only set up polling if processing is not complete
-    if (!isProcessingComplete) {
+    if (!currentProcessingComplete && currentVideo) {
       // Set up polling that checks the current video state each time
       pollIntervalRef.current = setInterval(async () => {
         const currentVideo = useVideoStore
@@ -97,7 +119,7 @@ const VideoDetails: React.FC = () => {
         pollIntervalRef.current = null;
       }
     };
-  }, [id, fetchLatestVideoById, isProcessingComplete]);
+  }, [id, fetchLatestVideoById]);
 
   const handleRefresh = async () => {
     if (id) {

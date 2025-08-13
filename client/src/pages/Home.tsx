@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useRef } from "react";
 import VideoCard from "../components/VideoCard";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { useVideoStore } from "../store/videoStore";
@@ -7,13 +7,33 @@ const Home: React.FC = () => {
   usePageTitle("Home");
 
   // Use Zustand store for all video data
-  const { videos, loading, error, fetchVideos, refetchVideos } =
+  const { videos, loading, error, fetchVideos, refetchVideos, isDataStale } =
     useVideoStore();
+
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     // Fetch videos when component mounts
     fetchVideos();
-  }, [fetchVideos]);
+
+    // Set up automatic refresh every 2 minutes to check if data is stale
+    const checkAndRefresh = () => {
+      if (isDataStale()) {
+        console.log("🔄 Data is stale, automatically fetching fresh videos...");
+        fetchVideos();
+      }
+    };
+
+    // Check immediately and then every 2 minutes
+    intervalRef.current = setInterval(checkAndRefresh, 2 * 60 * 1000);
+
+    // Cleanup interval on unmount
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, [fetchVideos, isDataStale]);
 
   const handleRefresh = () => {
     refetchVideos();

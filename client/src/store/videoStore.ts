@@ -116,7 +116,7 @@ export const useVideoStore = create<VideoState>()(
         loading: false,
         error: null,
         lastFetchTime: null,
-        cacheExpiry: 2 * 60 * 1000, // 5 minutes in milliseconds
+        cacheExpiry: 2 * 60 * 1000, // 2 minutes in milliseconds
 
         // Initial upload state
         isUploading: false,
