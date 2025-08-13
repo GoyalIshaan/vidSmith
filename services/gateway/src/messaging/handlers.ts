@@ -9,10 +9,6 @@ import { eq, sql } from "drizzle-orm";
 import { s3Client } from "../aws/s3Client";
 import { DeleteObjectCommand } from "@aws-sdk/client-s3";
 
-/**
- * Deletes the original video file from S3 if both captions and transcoding are finished
- * Returns immediately after starting the deletion (fire and forget pattern)
- */
 function deleteOriginalFileIfProcessingComplete(videoId: string) {
   // Fire and forget - start the async operation but don't wait for it
   (async () => {
