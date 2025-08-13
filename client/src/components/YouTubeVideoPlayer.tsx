@@ -42,19 +42,6 @@ const YouTubeVideoPlayer: React.FC<YouTubeVideoPlayerProps> = ({
                 </span>
               </button>
             </div>
-
-            <div className="flex-1 max-w-3xl mx-4">
-              <h1 className="text-lg font-semibold text-gray-900 truncate text-center px-4">
-                {video.videoName}
-              </h1>
-            </div>
-
-            <div className="flex items-center space-x-2">
-              <div className="hidden md:flex items-center space-x-1 text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full">
-                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                <span>Ready</span>
-              </div>
-            </div>
           </div>
         </div>
       </nav>
